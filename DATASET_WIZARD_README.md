@@ -16,6 +16,47 @@ You can start the pipeline from any stage using the `--start-from` option, allow
 
 Follow the original README.md file to install lerobot.
 
+## Configuration: Dataset List
+
+The first step is to configure which datasets you want to merge. Open `dataset-wizard.py` and locate the `move_dataset_repo_ids` list (around line 67):
+
+```python
+move_dataset_repo_ids = [
+    "move-blue-cup-feb12-v1.1",
+    "move-blue-cup-feb12-v2.1",
+    "move-blue-cup-feb12-v2.2",
+    "move-green-cup-13feb-v1.1",
+    "move-green-cup-13feb-v1.2",
+]
+```
+
+**Edit this list to include the dataset folder names you want to merge.** These should be the directory names that exist in your `--base-path` directory.
+
+### Example Dataset Configuration
+
+If your datasets are located at:
+```
+~/.cache/huggingface/lerobot/my-user/
+├── my-dataset-1/
+├── my-dataset-2/
+└── my-dataset-3/
+```
+
+Update the list to:
+```python
+move_dataset_repo_ids = [
+    "my-dataset-1",
+    "my-dataset-2",
+    "my-dataset-3",
+]
+```
+
+### Notes on Dataset Naming
+
+- Dataset folder names should match exactly as they appear in the `--base-path` directory
+- The script will skip any datasets that don't exist with a warning message
+- All datasets must be in v2.1 or v3.0 format (v2.1 datasets will be automatically converted)
+
 ## Configuration: Setting up the .env File
 
 The script uses environment variables from a `.env` file for SFTP configuration. Create a `.env` file in the root directory of the project with the following variables:
@@ -302,6 +343,25 @@ base-path/
 │   ├── metadata.json
 │   └── [dataset files]
 └── ... more datasets...
+```
+
+**Important:** The folder names that appear in `base-path/` must match the entries in the `move_dataset_repo_ids` list in `dataset-wizard.py`. For example, if your datasets are stored as:
+
+```
+~/.cache/huggingface/lerobot/my-user/
+├── move-blue-cup-feb12-v1.1/
+├── move-blue-cup-feb12-v2.1/
+└── move-green-cup-13feb-v1.2/
+```
+
+Then your `move_dataset_repo_ids` should be:
+
+```python
+move_dataset_repo_ids = [
+    "move-blue-cup-feb12-v1.1",
+    "move-blue-cup-feb12-v2.1",
+    "move-green-cup-13feb-v1.2",
+]
 ```
 
 After running, the structure will include:
