@@ -146,10 +146,10 @@ if args.start_from in ["conversion", "merge", "upload"]:
 
     load_dotenv()
 
-    hostname = os.getenv("SFTP_HOSTNAME")
+    hostname = str(os.getenv("SFTP_HOSTNAME"))
     port = int(os.getenv("SFTP_PORT", 22)) # Default SFTP port
-    username = os.getenv("SFTP_USERNAME")
-    password = os.getenv("SFTP_PASSWORD") # Use a secure method to handle passwords in production (e.g., environment variables, key files)
+    username = str(os.getenv("SFTP_USERNAME"))
+    password = str(os.getenv("SFTP_PASSWORD")) # Use a secure method to handle passwords in production (e.g., environment variables, key files)
     # Create an SSH client
     ssh_client = paramiko.SSHClient()
     # Automatically add the server's host key (use with caution in production, manual key verification is more secure)
@@ -164,6 +164,8 @@ if args.start_from in ["conversion", "merge", "upload"]:
     print("Connection successfully established.")
 
     remote_path = os.getenv("SFTP_REMOTE_PATH", None) # Ensure this path ends with a slash
+    if remote_path is not None:
+        remote_path = str(remote_path)
 
     if remote_path is None:
         raise ValueError("SFTP_REMOTE_PATH environment variable is not set. Please set it to the desired remote directory path (e.g., /remote/datasets/).")
