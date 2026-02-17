@@ -5,6 +5,7 @@ from pathlib import Path
 
 import paramiko
 from dotenv import load_dotenv
+from tqdm import tqdm
 
 from lerobot.datasets.dataset_tools import merge_datasets
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
@@ -168,11 +169,25 @@ if args.start_from in ["conversion", "merge", "upload"]:
         raise ValueError("SFTP_REMOTE_PATH environment variable is not set. Please set it to the desired remote directory path (e.g., /remote/datasets/).")
 
     # Upload the zip file to the SFTP server
+    # Check if remote_path ends with a slash, if not, add it
+    if not remote_path.endswith('/'):
+        remote_path += '/'
     remote_file_path = str(remote_path + zip_output_path.name)
+
+    # Get file size for progress bar
+    file_size = os.path.getsize(str(zip_output_path))
+
     print(f"Uploading {zip_output_path} to {remote_file_path} on the SFTP server...")
-    sftp_client.put(str(zip_output_path), remote_file_path)
+    with tqdm(total=file_size, unit="B", unit_scale=True, desc=f"Uploading {zip_output_path.name}") as pbar:
+        last = {"sent": 0}
+
+        def callback(transferred: int, total: int):
+            # transferred is cumulative; tqdm wants incremental updates
+            pbar.update(transferred - last["sent"])
+            last["sent"] = transferred
+
+        sftp_client.put(str(zip_output_path), remote_file_path, callback=callback)
+
     print(f"File uploaded successfully to {remote_file_path}.")
 else:
     print(f"Skipping compression and upload stage (--start-from {args.start_from})")
-
-
