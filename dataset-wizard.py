@@ -25,19 +25,20 @@ def parse_args():
         description="Merge datasets with optional conversion, compression, and SFTP upload.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Pipeline stages:
+Pipeline stages (in order):
   1. conversion   - Convert datasets from v2.1 to v3.0 format
   2. merge        - Load and merge individual datasets
-  3. upload       - Compress and upload to SFTP server
+  3. slice        - Remove unwanted sub-features from merged dataset
+  4. upload       - Compress and upload to SFTP server
 
 Examples:
   # Run all stages (default)
   python dataset-wizard.py
 
-  # Start from merge (skip conversion, run merge and upload)
-  python dataset-wizard.py --start-from merge
+  # Start from merge, stop after slice (skip conversion and upload)
+  python dataset-wizard.py --start-from merge --stop-at slice
 
-  # Start from upload (skip conversion and merge, run upload only)
+  # Run only the upload stage
   python dataset-wizard.py --start-from upload
 
   # Custom dataset path and name
@@ -47,9 +48,16 @@ Examples:
     parser.add_argument(
         "--start-from",
         type=str,
-        choices=["conversion", "merge", "upload"],
+        choices=["conversion", "merge", "slice", "upload"],
         default="conversion",
         help="Pipeline stage to start from (default: conversion)"
+    )
+    parser.add_argument(
+        "--stop-at",
+        type=str,
+        choices=["conversion", "merge", "slice", "upload"],
+        default="upload",
+        help="Pipeline stage to stop at, inclusive (default: upload)"
     )
     parser.add_argument(
         "--base-path",
@@ -70,17 +78,28 @@ Examples:
 args = parse_args()
 base_dataset_root = Path(args.base_path).expanduser()
 
+STAGES = ["conversion", "merge", "slice", "upload"]
+
+def should_run(stage: str) -> bool:
+    return STAGES.index(args.start_from) <= STAGES.index(stage) <= STAGES.index(args.stop_at)
+
 # List of individual 'move' dataset repo IDs you want to merge, explicitly excluding '_old' versions
 move_dataset_repo_ids = [
-    "move-blue-cup-feb12-v1.1",
-    "move-blue-cup-feb12-v2.1",
-    "move-blue-cup-feb12-v2.2",
-    "move-green-cup-13feb-v1.1",
-    "move-green-cup-13feb-v1.2",
+    "pick-up-blue-cup-mar26-v2.4",
+    "pick-up-blue-cup-mar26-v2.3",
+    "pick-up-blue-cup-mar26-v2.2",
+    "pick-up-blue-cup-mar26-v-2",
+    "pick-up-green-cup-mar26-v-2",
+    "pick-up-green-cup-mar26-v1.5",
+    "pick-up-green-cup-mar26-v1.4",
+    "pick-up-green-cup-mar26-v1.2",
+    "pick-up-green-cup-mar26-v1.1",
+    "pick-up-green-cup-mar26-v3",
+    "pick-up-green-cup-mar26-v1"
 ]
 
 # Convert datasets from v2.1 to v3.0 format if necessary
-if args.start_from == "conversion":
+if should_run("conversion"):
     print("Starting dataset conversion stage...")
     for repo_id in move_dataset_repo_ids:
         dataset_path = base_dataset_root / repo_id
@@ -94,7 +113,7 @@ if args.start_from == "conversion":
         else:
             print(f"Warning: Dataset directory not found for {repo_id} at {dataset_path}. Skipping conversion.")
 else:
-    print(f"Skipping dataset conversion stage (--start-from {args.start_from})")
+    print("Skipping dataset conversion stage.")
 
 
 
@@ -107,7 +126,7 @@ merged_repo_id = args.merged_name
 # Define the output directory for the merged dataset.
 output_directory = base_dataset_root / merged_repo_id
 
-if args.start_from in ["conversion", "merge"]:
+if should_run("merge"):
     print("Starting dataset loading and merging stage...")
     for repo_id in move_dataset_repo_ids:
         dataset_path = base_dataset_root / repo_id
@@ -136,11 +155,11 @@ if args.start_from in ["conversion", "merge"]:
     print(f"Total episodes in merged dataset: {merged_dataset.meta.total_episodes}")
     print(f"Total frames in merged dataset: {merged_dataset.meta.total_frames}")
 else:
-    print(f"Skipping dataset merge stage (--start-from {args.start_from})")
+    print("Skipping dataset merge stage.")
 
 
 # Slice unwanted sub-features from the merged dataset
-if args.start_from in ["conversion", "merge"]:
+if should_run("slice"):
     print("\nStarting feature slicing stage...")
 
     add_features_dict = {}
@@ -179,11 +198,11 @@ if args.start_from in ["conversion", "merge"]:
     output_directory = sliced_output_dir
     print(f"Sliced dataset saved to: {merged_dataset.root}")
 else:
-    print(f"Skipping feature slicing stage (--start-from {args.start_from})")
+    print("Skipping feature slicing stage.")
 
 
 # Compress zip the merged dataset for easier sharing and uploading
-if args.start_from in ["conversion", "merge", "upload"]:
+if should_run("upload"):
     print("Starting compression and upload stage...")
     zip_output_path = output_directory.with_suffix(".zip")
     print(f"\nCompressing merged dataset to: {zip_output_path}...")
@@ -242,4 +261,4 @@ if args.start_from in ["conversion", "merge", "upload"]:
 
     print(f"File uploaded successfully to {remote_file_path}.")
 else:
-    print(f"Skipping compression and upload stage (--start-from {args.start_from})")
+    print("Skipping compression and upload stage.")
