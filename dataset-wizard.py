@@ -103,15 +103,22 @@ if should_run("conversion"):
     print("Starting dataset conversion stage...")
     for repo_id in move_dataset_repo_ids:
         dataset_path = base_dataset_root / repo_id
-        if dataset_path.is_dir():
-            print(f"Checking dataset format for: {repo_id} at {dataset_path}")
-            convert_dataset(
-                repo_id=str(base_dataset_root.name + "/" + repo_id), # e.g. Manisha-Saleha/move-blue-cup-feb12-v1.1
-                root=str(base_dataset_root.parent), # e.g. ~/.cache/huggingface/lerobot
-                push_to_hub=False
-                )
-        else:
+        if not dataset_path.is_dir():
             print(f"Warning: Dataset directory not found for {repo_id} at {dataset_path}. Skipping conversion.")
+            continue
+        info_path = dataset_path / "meta" / "info.json"
+        if info_path.exists():
+            import json
+            version = json.loads(info_path.read_text()).get("codebase_version", "unknown")
+            if version != "v2.1":
+                print(f"Skipping '{repo_id}': already at version {version}.")
+                continue
+        print(f"Converting dataset: {repo_id} at {dataset_path}")
+        convert_dataset(
+            repo_id=str(base_dataset_root.name + "/" + repo_id), # e.g. Manisha-Saleha/move-blue-cup-feb12-v1.1
+            root=str(base_dataset_root.parent), # e.g. ~/.cache/huggingface/lerobot
+            push_to_hub=False
+        )
 else:
     print("Skipping dataset conversion stage.")
 
