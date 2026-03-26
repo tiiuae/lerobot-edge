@@ -4,11 +4,12 @@ The `dataset-wizard.py` script provides a complete pipeline for managing and mer
 
 ## Overview
 
-The Dataset Wizard performs three main stages:
+The Dataset Wizard performs four main stages:
 
 1. **Conversion** - Convert datasets from v2.1 to v3.0 format
 2. **Merge** - Load and merge individual datasets into a single unified dataset
-3. **Upload** - Compress and upload the merged dataset to an SFTP server
+3. **Slice** - Remove unwanted sub-features from merged dataset features (runs automatically after merge)
+4. **Upload** - Compress and upload the sliced dataset to an SFTP server
 
 You can start the pipeline from any stage using the `--start-from` option, allowing you to skip previously completed steps.
 
@@ -110,7 +111,8 @@ python dataset-wizard.py
 This will:
 1. Convert datasets from v2.1 to v3.0 format (if needed)
 2. Merge all configured datasets
-3. Compress and upload the result to the SFTP server
+3. Slice unwanted sub-features (see `FEATURES_TO_SLICE` in the script)
+4. Compress and upload the result to the SFTP server
 
 ### Command-Line Options
 
@@ -122,14 +124,40 @@ Skip earlier stages and start from a specific point:
 # Start from merge stage (skip conversion)
 python dataset-wizard.py --start-from merge
 
-# Start from upload stage (skip conversion and merge)
+# Start from upload stage (skip all earlier stages)
 python dataset-wizard.py --start-from upload
 ```
 
 **Options:**
 - `conversion` - Start from dataset format conversion (default)
 - `merge` - Skip conversion, start from dataset merging
-- `upload` - Skip conversion and merge, start from compression and upload
+- `slice` - Skip conversion and merge, start from feature slicing
+- `upload` - Skip all earlier stages, start from compression and upload
+
+#### `--stop-at` - Stop after a specific pipeline stage
+
+Run only up to (and including) a given stage, skipping the rest:
+
+```bash
+# Run conversion and merge only (skip slice and upload)
+python dataset-wizard.py --stop-at merge
+
+# Run conversion, merge, and slice (skip upload)
+python dataset-wizard.py --stop-at slice
+```
+
+**Options:**
+- `conversion` - Run only the conversion stage
+- `merge` - Stop after merging (skip slice and upload)
+- `slice` - Stop after slicing (skip upload)
+- `upload` - Run all stages through upload (default)
+
+Both options can be combined freely:
+
+```bash
+# Run only the slice stage
+python dataset-wizard.py --start-from slice --stop-at slice
+```
 
 #### `--base-path` - Specify dataset location
 
@@ -165,8 +193,9 @@ python dataset-wizard.py \
 This will:
 - Skip the conversion stage
 - Merge datasets from `~/.cache/huggingface/lerobot/my-user/`
-- Output to `~/.cache/huggingface/lerobot/my-user/my-aloha-merged-dataset/`
-- Compress and upload the result to the SFTP server
+- Output merged dataset to `.../my-aloha-merged-dataset/`
+- Slice unwanted sub-features and save to `.../my-aloha-merged-dataset-sliced/`
+- Compress and upload the sliced result to the SFTP server
 
 ## Pipeline Stages Explained
 
@@ -207,7 +236,36 @@ python dataset-wizard.py --start-from merge
 - Merged dataset directory at `{base-path}/{merged-name}/`
 - Statistics showing total episodes and frames
 
-### Stage 3: Upload
+### Stage 3: Slice
+
+Removes unwanted sub-elements from array features in the merged dataset. This runs automatically after the merge stage.
+
+**What gets removed** (configured via `FEATURES_TO_SLICE` at the top of `dataset-wizard.py`):
+
+| Feature | Removed sub-features | Shape change |
+|---------|----------------------|--------------|
+| `action` | `linear_vel`, `angular_vel` | `(16,)` → `(14,)` |
+| `observation.state` | `odom_x`, `odom_y`, `odom_theta`, `linear_vel`, `angular_vel` | `(19,)` → `(14,)` |
+
+**What happens:**
+- Reads each parquet file in the merged dataset
+- Replaces each feature with a sliced version (dropping the specified sub-elements)
+- Saves the result as a new dataset named `{merged-name}-sliced`
+- The original merged dataset is preserved untouched
+
+**Output:**
+- Sliced dataset directory at `{base-path}/{merged-name}-sliced/`
+
+**To change which sub-features are removed**, edit the `FEATURES_TO_SLICE` dictionary near the top of `dataset-wizard.py`:
+
+```python
+FEATURES_TO_SLICE = {
+    "action": ["linear_vel", "angular_vel"],
+    "observation.state": ["odom_x", "odom_y", "odom_theta", "linear_vel", "angular_vel"],
+}
+```
+
+### Stage 4: Upload
 
 Compresses the merged dataset and uploads it to the SFTP server.
 
@@ -222,6 +280,8 @@ Compresses the merged dataset and uploads it to the SFTP server.
 python dataset-wizard.py --start-from upload
 ```
 
+**Note:** When starting from `upload`, the script uses `{merged-name}` as the source directory (the pre-sliced merged dataset). To upload the sliced dataset, use `--merged-name {your-merged-name}-sliced`.
+
 **Requirements:**
 - Valid `.env` file with SFTP credentials
 - `SFTP_REMOTE_PATH` directory must exist on the server
@@ -233,10 +293,11 @@ python dataset-wizard.py --start-from upload
 ### During Processing
 - **Converted datasets:** Stored in-place at `{base-path}/{dataset-id}/`
 - **Merged dataset:** Created at `{base-path}/{merged-name}/`
-- **Compressed file:** Created as `{base-path}/{merged-name}.zip`
+- **Sliced dataset:** Created at `{base-path}/{merged-name}-sliced/`
+- **Compressed file:** Created as `{base-path}/{merged-name}-sliced.zip`
 
 ### After Upload
-- **Remote file:** Uploaded to `{SFTP_REMOTE_PATH}{merged-name}.zip`
+- **Remote file:** Uploaded to `{SFTP_REMOTE_PATH}{merged-name}-sliced.zip`
 
 ## Troubleshooting
 
@@ -294,29 +355,32 @@ Error: Could not convert dataset from v2.1 to v3.0
 
 ## Example Workflows
 
-### Workflow 1: Convert and Merge Only (No Upload)
+### Workflow 1: Convert, Merge, and Slice Only (No Upload)
 
-Use this when you want to prepare a merged dataset without uploading immediately:
+Use `--stop-at slice` to stop before the upload:
 
 ```bash
-python dataset-wizard.py --start-from conversion --base-path ~/.cache/huggingface/lerobot/my-user --merged-name dataset-v1
+python dataset-wizard.py \
+  --stop-at slice \
+  --base-path ~/.cache/huggingface/lerobot/my-user \
+  --merged-name dataset-v1
 ```
 
 Then later, upload only the final result:
 
 ```bash
-python dataset-wizard.py --start-from upload --base-path ~/.cache/huggingface/lerobot/my-user --merged-name dataset-v1
+python dataset-wizard.py --start-from upload --base-path ~/.cache/huggingface/lerobot/my-user --merged-name dataset-v1-sliced
 ```
 
 ### Workflow 2: Re-upload Without Re-merging
 
-If the initial upload failed but the merge was successful:
+If the initial upload failed but the merge and slice were successful:
 
 ```bash
-python dataset-wizard.py --start-from upload --base-path ~/.cache/huggingface/lerobot/my-user --merged-name dataset-v1
+python dataset-wizard.py --start-from upload --base-path ~/.cache/huggingface/lerobot/my-user --merged-name dataset-v1-sliced
 ```
 
-The previously merged dataset will be recompressed and uploaded.
+The previously sliced dataset will be recompressed and uploaded.
 
 ### Workflow 3: Full Pipeline with Custom Paths
 
@@ -369,10 +433,14 @@ After running, the structure will include:
 ```
 base-path/
 ├── [original datasets above]
-└── merged-name/
+├── merged-name/
+│   ├── videos/
+│   ├── data/
+│   └── meta/
+└── merged-name-sliced/
     ├── videos/
-    ├── metadata.json
-    └── [merged dataset files]
+    ├── data/
+    └── meta/
 ```
 
 ## Performance Tips
