@@ -32,16 +32,16 @@ Pipeline stages:
 
 Examples:
   # Run all stages (default)
-  python merge_datasets.py
+  python dataset-wizard.py
 
   # Start from merge (skip conversion, run merge and upload)
-  python merge_datasets.py --start-from merge
+  python dataset-wizard.py --start-from merge
 
   # Start from upload (skip conversion and merge, run upload only)
-  python merge_datasets.py --start-from upload
+  python dataset-wizard.py --start-from upload
 
   # Custom dataset path and name
-  python merge_datasets.py --base-path /custom/path --merged-name my-dataset
+  python dataset-wizard.py --base-path /custom/path --merged-name my-dataset
         """
     )
     parser.add_argument(
