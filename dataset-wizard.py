@@ -145,6 +145,10 @@ if should_run("merge"):
         else:
             print(f"Warning: Dataset directory not found for {repo_id} at {dataset_path}. Skipping.")
 
+    if output_directory.exists():
+        print(f"Output directory already exists, removing: {output_directory}")
+        shutil.rmtree(output_directory)
+
     print(f"\nMerging {len(datasets_to_merge)} datasets into {merged_repo_id} at {output_directory}...")
 
     # Merge the datasets
@@ -194,6 +198,10 @@ if should_run("slice"):
 
     sliced_repo_id = merged_repo_id + "-sliced"
     sliced_output_dir = base_dataset_root / sliced_repo_id
+
+    if sliced_output_dir.exists():
+        print(f"Sliced output directory already exists, removing: {sliced_output_dir}")
+        shutil.rmtree(sliced_output_dir)
 
     merged_dataset = modify_features(
         merged_dataset,

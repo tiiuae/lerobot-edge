@@ -314,7 +314,7 @@ def modify_features(
     if add_features:
         required_keys = {"dtype", "shape"}
         for feature_name, (_, feature_info) in add_features.items():
-            if feature_name in dataset.meta.features:
+            if feature_name in dataset.meta.features and feature_name not in remove_features_list:
                 raise ValueError(f"Feature '{feature_name}' already exists in dataset")
 
             if not required_keys.issubset(feature_info.keys()):
