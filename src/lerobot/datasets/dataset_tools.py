@@ -983,6 +983,10 @@ def _copy_data_with_feature_changes(
         chunk_idx = int(chunk_dir.split("-")[1])
         file_idx = int(file_name.split("-")[1].split(".")[0])
 
+        # Compute new feature values from the original df before any columns are dropped.
+        # This is important when a feature is being replaced (same name in both
+        # add_features and remove_features) so the callable can still read the old values.
+        computed_features = {}
         if add_features:
             end_idx = frame_idx + len(df)
             for feature_name, (values, _) in add_features.items():
@@ -995,17 +999,20 @@ def _copy_data_with_feature_changes(
                         if isinstance(value, np.ndarray) and value.size == 1:
                             value = value.item()
                         feature_values.append(value)
-                    df[feature_name] = feature_values
+                    computed_features[feature_name] = feature_values
                 else:
                     feature_slice = values[frame_idx:end_idx]
                     if len(feature_slice.shape) > 1 and feature_slice.shape[1] == 1:
-                        df[feature_name] = feature_slice.flatten()
+                        computed_features[feature_name] = feature_slice.flatten()
                     else:
-                        df[feature_name] = feature_slice
+                        computed_features[feature_name] = feature_slice
             frame_idx = end_idx
 
         if remove_features:
             df = df.drop(columns=remove_features, errors="ignore")
+
+        for feature_name, feature_values in computed_features.items():
+            df[feature_name] = feature_values
 
         # Write using the same chunk/file structure as source
         dst_path = new_meta.root / DEFAULT_DATA_PATH.format(chunk_index=chunk_idx, file_index=file_idx)
