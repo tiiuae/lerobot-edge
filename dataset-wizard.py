@@ -3,13 +3,20 @@ import os
 import shutil
 from pathlib import Path
 
+import numpy as np
 import paramiko
 from dotenv import load_dotenv
 from tqdm import tqdm
 
-from lerobot.datasets.dataset_tools import merge_datasets
+from lerobot.datasets.dataset_tools import merge_datasets, modify_features
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.datasets.v30.convert_dataset_v21_to_v30 import convert_dataset
+
+# Sub-features to remove after merging
+FEATURES_TO_SLICE = {
+    "action": ["linear_vel", "angular_vel"],
+    "observation.state": ["odom_x", "odom_y", "odom_theta", "linear_vel", "angular_vel"],
+}
 
 
 def parse_args():
@@ -130,6 +137,49 @@ if args.start_from in ["conversion", "merge"]:
     print(f"Total frames in merged dataset: {merged_dataset.meta.total_frames}")
 else:
     print(f"Skipping dataset merge stage (--start-from {args.start_from})")
+
+
+# Slice unwanted sub-features from the merged dataset
+if args.start_from in ["conversion", "merge"]:
+    print("\nStarting feature slicing stage...")
+
+    add_features_dict = {}
+    remove_features_list = []
+
+    for feature_key, names_to_remove in FEATURES_TO_SLICE.items():
+        original_info = merged_dataset.features[feature_key]
+        original_names = original_info["names"]
+        names_to_remove_set = set(names_to_remove)
+        keep_indices = [i for i, n in enumerate(original_names) if n not in names_to_remove_set]
+        new_names = [original_names[i] for i in keep_indices]
+        new_shape = (len(keep_indices),)
+
+        def make_slicer(key, indices):
+            def slicer(row_dict, _ep_idx, _frame_in_ep):
+                return np.array(row_dict[key], dtype=np.float32)[indices]
+            return slicer
+
+        add_features_dict[feature_key] = (
+            make_slicer(feature_key, keep_indices),
+            {"dtype": original_info["dtype"], "shape": new_shape, "names": new_names},
+        )
+        remove_features_list.append(feature_key)
+        print(f"  '{feature_key}': {original_info['shape']} -> {new_shape}, removed {names_to_remove}")
+
+    sliced_repo_id = merged_repo_id + "-sliced"
+    sliced_output_dir = base_dataset_root / sliced_repo_id
+
+    merged_dataset = modify_features(
+        merged_dataset,
+        add_features=add_features_dict,
+        remove_features=remove_features_list,
+        repo_id=sliced_repo_id,
+        output_dir=sliced_output_dir,
+    )
+    output_directory = sliced_output_dir
+    print(f"Sliced dataset saved to: {merged_dataset.root}")
+else:
+    print(f"Skipping feature slicing stage (--start-from {args.start_from})")
 
 
 # Compress zip the merged dataset for easier sharing and uploading
