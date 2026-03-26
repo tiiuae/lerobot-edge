@@ -983,9 +983,6 @@ def _copy_data_with_feature_changes(
         chunk_idx = int(chunk_dir.split("-")[1])
         file_idx = int(file_name.split("-")[1].split(".")[0])
 
-        if remove_features:
-            df = df.drop(columns=remove_features, errors="ignore")
-
         if add_features:
             end_idx = frame_idx + len(df)
             for feature_name, (values, _) in add_features.items():
@@ -1006,6 +1003,9 @@ def _copy_data_with_feature_changes(
                     else:
                         df[feature_name] = feature_slice
             frame_idx = end_idx
+
+        if remove_features:
+            df = df.drop(columns=remove_features, errors="ignore")
 
         # Write using the same chunk/file structure as source
         dst_path = new_meta.root / DEFAULT_DATA_PATH.format(chunk_index=chunk_idx, file_index=file_idx)
