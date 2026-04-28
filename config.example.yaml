@@ -1,0 +1,27 @@
+# Dataset Wizard Configuration — Example
+# Copy this file to config.yaml and fill in your values.
+# WARNING: config.yaml may contain credentials. Do NOT commit it to version control.
+
+# ── Pipeline control ──────────────────────────────────────────────────────────
+start_from: conversion  # Options: conversion | merge | upload
+stop_at: upload         # Options: conversion | merge | upload
+
+# ── Dataset location ──────────────────────────────────────────────────────────
+base_path: ~/.cache/huggingface/lerobot/your-username
+
+# ── Output dataset name ───────────────────────────────────────────────────────
+merged_name: my-merged-dataset
+
+# ── Datasets to merge ─────────────────────────────────────────────────────────
+datasets:
+  - my-dataset-1
+  - my-dataset-2
+  - my-dataset-3
+
+# ── SFTP upload configuration ─────────────────────────────────────────────────
+sftp:
+  hostname: xxx.xxx.xxx.xxx
+  port: 22
+  username: your_username
+  password: your_password
+  remote_path: /path/to/remote/directory

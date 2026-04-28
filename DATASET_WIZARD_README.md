@@ -4,12 +4,11 @@ The `dataset-wizard.py` script provides a complete pipeline for managing and mer
 
 ## Overview
 
-The Dataset Wizard performs four main stages:
+The Dataset Wizard performs three main stages:
 
 1. **Conversion** - Convert datasets from v2.1 to v3.0 format
 2. **Merge** - Load and merge individual datasets into a single unified dataset
-3. **Slice** - Remove unwanted sub-features from merged dataset features (runs automatically after merge)
-4. **Upload** - Compress and upload the sliced dataset to an SFTP server
+3. **Upload** - Compress and upload the merged dataset to an SFTP server
 
 You can start the pipeline from any stage using the `--start-from` option, allowing you to skip previously completed steps.
 
@@ -111,8 +110,7 @@ python dataset-wizard.py
 This will:
 1. Convert datasets from v2.1 to v3.0 format (if needed)
 2. Merge all configured datasets
-3. Slice unwanted sub-features (see `FEATURES_TO_SLICE` in the script)
-4. Compress and upload the result to the SFTP server
+3. Compress and upload the result to the SFTP server
 
 ### Command-Line Options
 
@@ -131,7 +129,6 @@ python dataset-wizard.py --start-from upload
 **Options:**
 - `conversion` - Start from dataset format conversion (default)
 - `merge` - Skip conversion, start from dataset merging
-- `slice` - Skip conversion and merge, start from feature slicing
 - `upload` - Skip all earlier stages, start from compression and upload
 
 #### `--stop-at` - Stop after a specific pipeline stage
@@ -139,24 +136,20 @@ python dataset-wizard.py --start-from upload
 Run only up to (and including) a given stage, skipping the rest:
 
 ```bash
-# Run conversion and merge only (skip slice and upload)
+# Run conversion and merge only (skip upload)
 python dataset-wizard.py --stop-at merge
-
-# Run conversion, merge, and slice (skip upload)
-python dataset-wizard.py --stop-at slice
 ```
 
 **Options:**
 - `conversion` - Run only the conversion stage
-- `merge` - Stop after merging (skip slice and upload)
-- `slice` - Stop after slicing (skip upload)
+- `merge` - Stop after merging (skip upload)
 - `upload` - Run all stages through upload (default)
 
 Both options can be combined freely:
 
 ```bash
-# Run only the slice stage
-python dataset-wizard.py --start-from slice --stop-at slice
+# Run only the merge stage
+python dataset-wizard.py --start-from merge --stop-at merge
 ```
 
 #### `--base-path` - Specify dataset location
@@ -194,8 +187,7 @@ This will:
 - Skip the conversion stage
 - Merge datasets from `~/.cache/huggingface/lerobot/my-user/`
 - Output merged dataset to `.../my-aloha-merged-dataset/`
-- Slice unwanted sub-features and save to `.../my-aloha-merged-dataset-sliced/`
-- Compress and upload the sliced result to the SFTP server
+- Compress and upload the merged result to the SFTP server
 
 ## Pipeline Stages Explained
 
@@ -280,7 +272,7 @@ Compresses the merged dataset and uploads it to the SFTP server.
 python dataset-wizard.py --start-from upload
 ```
 
-**Note:** When starting from `upload`, the script uses `{merged-name}` as the source directory (the pre-sliced merged dataset). To upload the sliced dataset, use `--merged-name {your-merged-name}-sliced`.
+**Note:** When starting from `upload`, the script uses `{merged-name}` as the source directory.
 
 **Requirements:**
 - Valid `.env` file with SFTP credentials
@@ -293,11 +285,10 @@ python dataset-wizard.py --start-from upload
 ### During Processing
 - **Converted datasets:** Stored in-place at `{base-path}/{dataset-id}/`
 - **Merged dataset:** Created at `{base-path}/{merged-name}/`
-- **Sliced dataset:** Created at `{base-path}/{merged-name}-sliced/`
-- **Compressed file:** Created as `{base-path}/{merged-name}-sliced.zip`
+- **Compressed file:** Created as `{base-path}/{merged-name}.zip`
 
 ### After Upload
-- **Remote file:** Uploaded to `{SFTP_REMOTE_PATH}{merged-name}-sliced.zip`
+- **Remote file:** Uploaded to `{SFTP_REMOTE_PATH}{merged-name}.zip`
 
 ## Troubleshooting
 
@@ -355,13 +346,13 @@ Error: Could not convert dataset from v2.1 to v3.0
 
 ## Example Workflows
 
-### Workflow 1: Convert, Merge, and Slice Only (No Upload)
+### Workflow 1: Convert and Merge Only (No Upload)
 
-Use `--stop-at slice` to stop before the upload:
+Use `--stop-at merge` to stop before the upload:
 
 ```bash
 python dataset-wizard.py \
-  --stop-at slice \
+  --stop-at merge \
   --base-path ~/.cache/huggingface/lerobot/my-user \
   --merged-name dataset-v1
 ```
@@ -369,18 +360,18 @@ python dataset-wizard.py \
 Then later, upload only the final result:
 
 ```bash
-python dataset-wizard.py --start-from upload --base-path ~/.cache/huggingface/lerobot/my-user --merged-name dataset-v1-sliced
+python dataset-wizard.py --start-from upload --base-path ~/.cache/huggingface/lerobot/my-user --merged-name dataset-v1
 ```
 
 ### Workflow 2: Re-upload Without Re-merging
 
-If the initial upload failed but the merge and slice were successful:
+If the initial upload failed but the merge was successful:
 
 ```bash
-python dataset-wizard.py --start-from upload --base-path ~/.cache/huggingface/lerobot/my-user --merged-name dataset-v1-sliced
+python dataset-wizard.py --start-from upload --base-path ~/.cache/huggingface/lerobot/my-user --merged-name dataset-v1
 ```
 
-The previously sliced dataset will be recompressed and uploaded.
+The previously merged dataset will be recompressed and uploaded.
 
 ### Workflow 3: Full Pipeline with Custom Paths
 
@@ -433,11 +424,7 @@ After running, the structure will include:
 ```
 base-path/
 ├── [original datasets above]
-├── merged-name/
-│   ├── videos/
-│   ├── data/
-│   └── meta/
-└── merged-name-sliced/
+└── merged-name/
     ├── videos/
     ├── data/
     └── meta/

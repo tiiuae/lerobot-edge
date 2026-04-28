@@ -3,20 +3,14 @@ import os
 import shutil
 from pathlib import Path
 
-import numpy as np
 import paramiko
-from dotenv import load_dotenv
+import yaml
 from tqdm import tqdm
 
-from lerobot.datasets.dataset_tools import merge_datasets, modify_features
+from lerobot.datasets.dataset_tools import merge_datasets
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.datasets.v30.convert_dataset_v21_to_v30 import convert_dataset
 
-# Sub-features to remove after merging
-FEATURES_TO_SLICE = {
-    "action": ["linear_vel", "angular_vel"],
-    "observation.state": ["odom_x", "odom_y", "odom_theta", "linear_vel", "angular_vel"],
-}
 
 
 def parse_args():
@@ -28,97 +22,121 @@ def parse_args():
 Pipeline stages (in order):
   1. conversion   - Convert datasets from v2.1 to v3.0 format
   2. merge        - Load and merge individual datasets
-  3. slice        - Remove unwanted sub-features from merged dataset
-  4. upload       - Compress and upload to SFTP server
+  3. upload       - Compress and upload to SFTP server
 
 Examples:
-  # Run all stages (default)
+  # Run all stages using default config.yaml
   python dataset-wizard.py
 
-  # Start from merge, stop after slice (skip conversion and upload)
-  python dataset-wizard.py --start-from merge --stop-at slice
+  # Use a custom config file
+  python dataset-wizard.py --config my-config.yaml
 
-  # Run only the upload stage
-  python dataset-wizard.py --start-from upload
-
-  # Custom dataset path and name
-  python dataset-wizard.py --base-path /custom/path --merged-name my-dataset
+  # Override pipeline stage range via CLI
+  python dataset-wizard.py --start-from merge --stop-at merge
         """
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default="config.yaml",
+        help="Path to YAML configuration file (default: config.yaml)"
     )
     parser.add_argument(
         "--start-from",
         type=str,
-        choices=["conversion", "merge", "slice", "upload"],
-        default="conversion",
-        help="Pipeline stage to start from (default: conversion)"
+        choices=["conversion", "merge", "upload"],
+        default=None,
+        help="Override start stage from config file"
     )
     parser.add_argument(
         "--stop-at",
         type=str,
-        choices=["conversion", "merge", "slice", "upload"],
-        default="upload",
-        help="Pipeline stage to stop at, inclusive (default: upload)"
-    )
-    parser.add_argument(
-        "--base-path",
-        type=Path,
-        default="~/.cache/huggingface/lerobot/Manisha-Saleha",
-        help="Base directory where datasets are located (default: ~/.cache/huggingface/lerobot/Manisha-Saleha)"
-    )
-    parser.add_argument(
-        "--merged-name",
-        type=str,
-        default="test-aloha-dataset-merged",
-        help="Name of the merged dataset repository (default: test-aloha-dataset-merged)"
+        choices=["conversion", "merge", "upload"],
+        default=None,
+        help="Override stop stage from config file"
     )
     return parser.parse_args()
 
 
-# Define the root directory where your datasets are located
 args = parse_args()
-base_dataset_root = Path(args.base_path).expanduser()
 
-STAGES = ["conversion", "merge", "slice", "upload"]
+with open(args.config) as f:
+    cfg = yaml.safe_load(f)
+
+move_dataset_repo_ids = cfg["datasets"]
+base_dataset_root = Path(cfg["base_path"]).expanduser()
+merged_repo_id = cfg["merged_name"]
+
+STAGES = ["conversion", "merge", "upload"]
+
+start_from = args.start_from or cfg.get("start_from", "conversion")
+stop_at = args.stop_at or cfg.get("stop_at", "upload")
 
 def should_run(stage: str) -> bool:
-    return STAGES.index(args.start_from) <= STAGES.index(stage) <= STAGES.index(args.stop_at)
-
-# List of individual 'move' dataset repo IDs you want to merge, explicitly excluding '_old' versions
-move_dataset_repo_ids = [
-    "pick-up-blue-cup-mar26-v2.4",
-    "pick-up-blue-cup-mar26-v2.3",
-    "pick-up-blue-cup-mar26-v2.2",
-    "pick-up-blue-cup-mar26-v-2",
-    "pick-up-green-cup-mar26-v-2",
-    "pick-up-green-cup-mar26-v1.5",
-    "pick-up-green-cup-mar26-v1.4",
-    "pick-up-green-cup-mar26-v1.2",
-    "pick-up-green-cup-mar26-v1.1",
-    "pick-up-green-cup-mar26-v3",
-    "pick-up-green-cup-mar26-v1"
-]
+    return STAGES.index(start_from) <= STAGES.index(stage) <= STAGES.index(stop_at)
 
 # Convert datasets from v2.1 to v3.0 format if necessary
 if should_run("conversion"):
+    GREEN = "\033[32m"
+    RED   = "\033[31m"
+    RESET = "\033[0m"
+
     print("Starting dataset conversion stage...")
+    conversion_ok = []          # list of (repo_id, label)
+    conversion_failed = []      # list of (repo_id, path, error)
+
     for repo_id in move_dataset_repo_ids:
         dataset_path = base_dataset_root / repo_id
-        if not dataset_path.is_dir():
+        old_path = base_dataset_root / f"{repo_id}_old"
+
+        # Already converted: {repo_id} exists at v3.0 (original renamed to {repo_id}_old)
+        if dataset_path.is_dir():
+            info_path = dataset_path / "meta" / "info.json"
+            if info_path.exists():
+                import json
+                version = json.loads(info_path.read_text()).get("codebase_version", "unknown")
+                if version != "v2.1":
+                    conversion_ok.append((repo_id, f"already converted ({version})"))
+                    continue
+        elif old_path.is_dir():
+            # {repo_id} is gone but {repo_id}_old exists — treat as already converted
+            conversion_ok.append((repo_id, "already converted (_old present)"))
+            continue
+        else:
             print(f"Warning: Dataset directory not found for {repo_id} at {dataset_path}. Skipping conversion.")
             continue
-        info_path = dataset_path / "meta" / "info.json"
-        if info_path.exists():
-            import json
-            version = json.loads(info_path.read_text()).get("codebase_version", "unknown")
-            if version != "v2.1":
-                print(f"Skipping '{repo_id}': already at version {version}.")
-                continue
+
         print(f"Converting dataset: {repo_id} at {dataset_path}")
-        convert_dataset(
-            repo_id=str(base_dataset_root.name + "/" + repo_id), # e.g. Manisha-Saleha/move-blue-cup-feb12-v1.1
-            root=str(base_dataset_root.parent), # e.g. ~/.cache/huggingface/lerobot
-            push_to_hub=False
+        try:
+            convert_dataset(
+                repo_id=str(base_dataset_root.name + "/" + repo_id), # e.g. Manisha-Saleha/move-blue-cup-feb12-v1.1
+                root=str(base_dataset_root.parent), # e.g. ~/.cache/huggingface/lerobot
+                push_to_hub=False
+            )
+            conversion_ok.append((repo_id, "converted"))
+        except Exception as e:
+            conversion_failed.append((repo_id, dataset_path, e))
+            continue
+
+    print("\n── Conversion summary ──────────────────────────────────────────")
+    for repo_id, label in conversion_ok:
+        print(f"  {GREEN}✔ {repo_id}  ({label}){RESET}")
+    for repo_id, dataset_path, e in conversion_failed:
+        print(
+            f"  {RED}✘ {repo_id}{RESET}\n"
+            f"      Path   : {dataset_path}\n"
+            f"      Reason : {type(e).__name__}: {e}"
         )
+    print("────────────────────────────────────────────────────────────────\n")
+
+    if conversion_failed and should_run("merge") or should_run("upload"):
+        answer = input(
+            f"{len(conversion_failed)} dataset(s) failed conversion. "
+            f"Proceed with merge/upload for the {len(conversion_ok)} succeeded dataset(s)? [y/N] "
+        ).strip().lower()
+        if answer != "y":
+            print("Aborting. Fix the failing datasets and re-run.")
+            raise SystemExit(0)
 else:
     print("Skipping dataset conversion stage.")
 
@@ -128,8 +146,6 @@ else:
 datasets_to_merge = []
 
 # Define the output repository ID for the merged dataset.
-merged_repo_id = args.merged_name
-
 # Define the output directory for the merged dataset.
 output_directory = base_dataset_root / merged_repo_id
 
@@ -169,52 +185,6 @@ else:
     print("Skipping dataset merge stage.")
 
 
-# Slice unwanted sub-features from the merged dataset
-if should_run("slice"):
-    print("\nStarting feature slicing stage...")
-
-    add_features_dict = {}
-    remove_features_list = []
-
-    for feature_key, names_to_remove in FEATURES_TO_SLICE.items():
-        original_info = merged_dataset.features[feature_key]
-        original_names = original_info["names"]
-        names_to_remove_set = set(names_to_remove)
-        keep_indices = [i for i, n in enumerate(original_names) if n not in names_to_remove_set]
-        new_names = [original_names[i] for i in keep_indices]
-        new_shape = (len(keep_indices),)
-
-        def make_slicer(key, indices):
-            def slicer(row_dict, _ep_idx, _frame_in_ep):
-                return np.array(row_dict[key], dtype=np.float32)[indices]
-            return slicer
-
-        add_features_dict[feature_key] = (
-            make_slicer(feature_key, keep_indices),
-            {"dtype": original_info["dtype"], "shape": new_shape, "names": new_names},
-        )
-        remove_features_list.append(feature_key)
-        print(f"  '{feature_key}': {original_info['shape']} -> {new_shape}, removed {names_to_remove}")
-
-    sliced_repo_id = merged_repo_id + "-sliced"
-    sliced_output_dir = base_dataset_root / sliced_repo_id
-
-    if sliced_output_dir.exists():
-        print(f"Sliced output directory already exists, removing: {sliced_output_dir}")
-        shutil.rmtree(sliced_output_dir)
-
-    merged_dataset = modify_features(
-        merged_dataset,
-        add_features=add_features_dict,
-        remove_features=remove_features_list,
-        repo_id=sliced_repo_id,
-        output_dir=sliced_output_dir,
-    )
-    output_directory = sliced_output_dir
-    print(f"Sliced dataset saved to: {merged_dataset.root}")
-else:
-    print("Skipping feature slicing stage.")
-
 
 # Compress zip the merged dataset for easier sharing and uploading
 if should_run("upload"):
@@ -225,37 +195,26 @@ if should_run("upload"):
     print(f"Dataset compressed successfully to: {zip_output_path}\n")
 
     # Send the merged dataset to the SFTP server
-    # Connection parameters
-    # Load from .env file
-
-    load_dotenv()
-
-    hostname = str(os.getenv("SFTP_HOSTNAME"))
-    port = int(os.getenv("SFTP_PORT", 22)) # Default SFTP port
-    username = str(os.getenv("SFTP_USERNAME"))
-    password = str(os.getenv("SFTP_PASSWORD")) # Use a secure method to handle passwords in production (e.g., environment variables, key files)
-    # Create an SSH client
-    ssh_client = paramiko.SSHClient()
-    # Automatically add the server's host key (use with caution in production, manual key verification is more secure)
-    ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-
-    # Connect to the server
-    ssh_client.connect(hostname, port, username, password)
-
-    # Start an SFTP session
-    sftp_client = ssh_client.open_sftp()
-
-    print("Connection successfully established.")
-
-    remote_path = os.getenv("SFTP_REMOTE_PATH", None) # Ensure this path ends with a slash
-    if remote_path is not None:
-        remote_path = str(remote_path)
+    sftp_cfg = cfg.get("sftp", {})
+    hostname = str(sftp_cfg["hostname"])
+    port = int(sftp_cfg.get("port", 22))
+    username = str(sftp_cfg["username"])
+    password = str(sftp_cfg["password"])
+    remote_path = sftp_cfg.get("remote_path")
 
     if remote_path is None:
-        raise ValueError("SFTP_REMOTE_PATH environment variable is not set. Please set it to the desired remote directory path (e.g., /remote/datasets/).")
+        raise ValueError("sftp.remote_path is not set in the config file.")
+    remote_path = str(remote_path)
+
+    # Create an SSH client and connect
+    ssh_client = paramiko.SSHClient()
+    ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh_client.connect(hostname, port, username, password)
+
+    sftp_client = ssh_client.open_sftp()
+    print("Connection successfully established.")
 
     # Upload the zip file to the SFTP server
-    # Check if remote_path ends with a slash, if not, add it
     if not remote_path.endswith('/'):
         remote_path += '/'
     remote_file_path = str(remote_path + zip_output_path.name)
