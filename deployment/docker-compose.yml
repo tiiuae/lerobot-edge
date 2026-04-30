@@ -1,0 +1,46 @@
+# Run with:
+#   cd lerobot/deployment
+#   docker compose up --build
+#
+# Override values via env or `make docker-up CKPT=/path POLICY_TYPE=pi05 ...`.
+services:
+  lerobot_server:
+    image: lerobot_server:latest
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+    init: true
+    tty: true
+    stdin_open: true
+    network_mode: host                   # so PORT inside == outside; useful for low-latency robot links
+    # ports:                             # uncomment if you prefer bridged networking
+    #   - "${PORT:-8800}:${PORT:-8800}"
+
+    volumes:
+      # Mount checkpoint directory (host) → /models (container).
+      - ${MODELS_DIR:-/home/ibrahim/storage/VLA_MODELS}:/models:ro
+      # Persist HuggingFace cache so paligemma tokenizer / weights aren't redownloaded each run.
+      - ${HF_CACHE:-${HOME}/.cache/huggingface}:/root/.cache/huggingface
+      # Optional debug artefact dir (host).
+      - ${DEBUG_HOST_DIR:-/tmp/lerobot_debug}:/debug
+
+    environment:
+      # Built up from compose vars so `make docker-up CKPT=... POLICY_TYPE=...` flows through.
+      # Note: CKPT must be a path INSIDE /models (since MODELS_DIR is mounted there).
+      - SERVER_ARGS=--ckpt_path ${CKPT:-/models/checkpoint}
+                    ${POLICY_TYPE:+--policy_type ${POLICY_TYPE}}
+                    --camera_keys ${CAM_KEYS:-cam_high:primary,cam_left_wrist:secondary,cam_right_wrist:wrist}
+                    --actions_per_chunk ${ACTIONS:-25}
+                    --device ${DEVICE:-cuda:0}
+                    --port ${PORT:-8800}
+                    --idle_timeout ${IDLE_TIMEOUT:--1}
+                    --use_bf16
+                    ${DEBUG_DIR:+--debug_dir ${DEBUG_DIR}}
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
