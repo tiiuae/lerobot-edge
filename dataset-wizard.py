@@ -1,16 +1,156 @@
 import argparse
 import os
 import shutil
+import tempfile
 from pathlib import Path
 
-import paramiko
+import numpy as np
+import pandas as pd
 import yaml
 from tqdm import tqdm
 
-from lerobot.datasets.dataset_tools import merge_datasets
+from lerobot.datasets.dataset_tools import merge_datasets, modify_features
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
-from lerobot.datasets.v30.convert_dataset_v21_to_v30 import convert_dataset
+from lerobot.scripts.convert_dataset_v21_to_v30 import convert_dataset
 
+# ── EE-specific imports ───────────────────────────────────────────────────────
+from lerobot.datasets.compute_stats import aggregate_stats, compute_episode_stats  
+from lerobot.datasets.io_utils import write_stats  
+from lerobot.model.kinematics import RobotKinematics  
+from lerobot.utils.rotation import Rotation 
+
+
+# ── Constants ─────────────────────────────────────────────────────────────────  
+MOBILE_AI_URDF_PATH = Path(__file__).with_name("mobile_ai.urdf")  
+  
+# Hardcode joint names exactly as they appear in the URDF  
+LEFT_JOINTS  = [f"follower_left_joint_{i}"  for i in range(6)]  
+RIGHT_JOINTS = [f"follower_right_joint_{i}" for i in range(6)]  
+  
+# Hardcode the index layout of observation.state / action vectors:  
+#   [left_joint_0..5, left_gripper, right_joint_0..5, right_gripper, ...]  
+LEFT_JOINT_SLICE   = slice(0, 6)  
+LEFT_GRIPPER_IDX   = 6  
+RIGHT_JOINT_SLICE  = slice(7, 13)  
+RIGHT_GRIPPER_IDX  = 13  
+
+EE_COMPONENTS = ("x", "y", "z", "wx", "wy", "wz")
+  
+  
+# ── Kinematics solvers (created once, reused per row) ─────────────────────────  
+def _make_solvers(urdf_path: Path) -> tuple[RobotKinematics, RobotKinematics]:  
+    left  = RobotKinematics(str(urdf_path), "follower_left_ee_gripper_link",  LEFT_JOINTS)  
+    right = RobotKinematics(str(urdf_path), "follower_right_ee_gripper_link", RIGHT_JOINTS)  
+    return left, right  
+  
+  
+def _fk_to_ee(kinematics: RobotKinematics, joint_angles_deg: np.ndarray) -> list[float]:  
+    T = kinematics.forward_kinematics(joint_angles_deg)  
+    pos    = T[:3, 3]  
+    rotvec = Rotation.from_matrix(T[:3, :3]).as_rotvec()  
+    return [*pos, *rotvec]   # 6 values: x, y, z, wx, wy, wz  
+  
+  
+# ── Converter callable (matches modify_features signature) ────────────────────  
+def _make_converter(feature_key: str, left_kin: RobotKinematics, right_kin: RobotKinematics):  
+    def convert(row: dict, episode_index: int, frame_index: int) -> np.ndarray:  
+        v = np.asarray(row[feature_key], dtype=np.float32)  
+  
+        left_ee   = _fk_to_ee(left_kin,  v[LEFT_JOINT_SLICE])  
+        right_ee  = _fk_to_ee(right_kin, v[RIGHT_JOINT_SLICE])  
+        left_grip  = float(v[LEFT_GRIPPER_IDX])  
+        right_grip = float(v[RIGHT_GRIPPER_IDX])  
+  
+        # Output layout: [left_ee(6), left_gripper, right_ee(6), right_gripper]  
+        return np.array([*left_ee, left_grip, *right_ee, right_grip], dtype=np.float32)  
+  
+    return convert  
+  
+  
+# ── Stats recomputation ───────────────────────────────────────────────────────  
+def _recompute_stats(dataset: LeRobotDataset, feature_keys: list[str]) -> None:  
+    data_files = sorted((dataset.root / "data").glob("*/*.parquet"))  
+    features_to_compute = {k: dataset.meta.features[k] for k in feature_keys}  
+    episode_stats = []  
+    for data_file in data_files:  
+        df = pd.read_parquet(data_file)  
+        for _, ep_df in df.groupby("episode_index", sort=True):  
+            episode_data = {  
+                k: np.stack([np.asarray(v, dtype=np.float32) for v in ep_df[k]])  
+                for k in feature_keys  
+            }  
+            episode_stats.append(compute_episode_stats(episode_data, features_to_compute))  
+    stats = dict(dataset.meta.stats or {})  
+    stats.update(aggregate_stats(episode_stats))  
+    write_stats(stats, dataset.root)  
+    dataset.meta.stats = stats  
+  
+  
+# ── Main conversion function ──────────────────────────────────────────────────  
+def convert_joint_to_ee_and_save_lerobot_dataset(  
+    source_dataset: LeRobotDataset,  
+    output_repo_id: str,  
+    output_dir: Path | None = None,  
+    urdf_path: Path = MOBILE_AI_URDF_PATH,  
+    feature_keys: list[str] | None = None,  
+    overwrite: bool = False,  
+) -> LeRobotDataset:  
+    urdf_path = Path(urdf_path).expanduser()  
+    if output_dir is not None:  
+        output_dir = Path(output_dir).expanduser()  
+        if output_dir.exists():  
+            if not overwrite:  
+                raise FileExistsError(f"Output already exists: {output_dir}")  
+            shutil.rmtree(output_dir)  
+  
+    left_kin, right_kin = _make_solvers(urdf_path)  
+  
+    # Default: convert observation.state and action  
+    keys_to_convert = feature_keys or [  
+        k for k in ("observation.state", "action")  
+        if k in source_dataset.meta.features  
+    ]  
+  
+    # Build the new feature_info for each key (same dtype/shape, new names)  
+    ee_output_size = 14  # left(6) + left_gripper(1) + right(6) + right_gripper(1)  
+    add_features = {  
+        f"{key}_ee": (  
+            _make_converter(key, left_kin, right_kin),  
+            {  
+                "dtype": "float32",  
+                "shape": (ee_output_size,),  
+                "names": [  
+                    "left.ee.x", "left.ee.y", "left.ee.z",  
+                    "left.ee.wx", "left.ee.wy", "left.ee.wz",  
+                    "left.ee.gripper_pos",  
+                    "right.ee.x", "right.ee.y", "right.ee.z",  
+                    "right.ee.wx", "right.ee.wy", "right.ee.wz",  
+                    "right.ee.gripper_pos",  
+                ],  
+            },  
+        )  
+        for key in keys_to_convert  
+    }  
+    ee_keys = list(add_features.keys())  
+  
+    # Two-pass approach: modify_features rejects adding a key that already exists,  
+    # so we add with a temp '_ee' suffix first, then remove the originals.  
+    with tempfile.TemporaryDirectory() as tmp_dir:  
+        intermediate = modify_features(  
+            dataset=source_dataset,  
+            add_features=add_features,  
+            output_dir=Path(tmp_dir) / "intermediate",  
+            repo_id=f"{output_repo_id}_intermediate",  
+        )  
+        converted = modify_features(  
+            dataset=intermediate,  
+            remove_features=keys_to_convert,  
+            output_dir=output_dir,  
+            repo_id=output_repo_id,  
+        )  
+  
+    _recompute_stats(converted, ee_keys)  
+    return converted
 
 
 def parse_args():
@@ -22,7 +162,8 @@ def parse_args():
 Pipeline stages (in order):
   1. conversion   - Convert datasets from v2.1 to v3.0 format
   2. merge        - Load and merge individual datasets
-  3. upload       - Compress and upload to SFTP server
+  3. joint_to_ee  - Convert joint-space features to end-effector features
+  4. upload       - Compress and upload to SFTP server
 
 Examples:
   # Run all stages using default config.yaml
@@ -44,14 +185,14 @@ Examples:
     parser.add_argument(
         "--start-from",
         type=str,
-        choices=["conversion", "merge", "upload"],
+        choices=["conversion", "merge", "joint_to_ee", "upload"],
         default=None,
         help="Override start stage from config file"
     )
     parser.add_argument(
         "--stop-at",
         type=str,
-        choices=["conversion", "merge", "upload"],
+        choices=["conversion", "merge", "joint_to_ee", "upload"],
         default=None,
         help="Override stop stage from config file"
     )
@@ -67,10 +208,17 @@ move_dataset_repo_ids = cfg["datasets"]
 base_dataset_root = Path(cfg["base_path"]).expanduser()
 merged_repo_id = cfg["merged_name"]
 
-STAGES = ["conversion", "merge", "upload"]
+STAGES = ["conversion", "merge", "joint_to_ee", "upload"]
 
 start_from = args.start_from or cfg.get("start_from", "conversion")
 stop_at = args.stop_at or cfg.get("stop_at", "upload")
+
+for stage_name, stage_value in (("start_from", start_from), ("stop_at", stop_at)):
+    if stage_value not in STAGES:
+        raise ValueError(f"{stage_name} must be one of: {', '.join(STAGES)}")
+
+if STAGES.index(start_from) > STAGES.index(stop_at):
+    raise ValueError(f"start_from ({start_from}) must come before or match stop_at ({stop_at})")
 
 def should_run(stage: str) -> bool:
     return STAGES.index(start_from) <= STAGES.index(stage) <= STAGES.index(stop_at)
@@ -129,7 +277,7 @@ if should_run("conversion"):
         )
     print("────────────────────────────────────────────────────────────────\n")
 
-    if conversion_failed and should_run("merge") or should_run("upload"):
+    if conversion_failed and (should_run("merge") or should_run("joint_to_ee") or should_run("upload")):
         answer = input(
             f"{len(conversion_failed)} dataset(s) failed conversion. "
             f"Proceed with merge/upload for the {len(conversion_ok)} succeeded dataset(s)? [y/N] "
@@ -184,13 +332,62 @@ if should_run("merge"):
 else:
     print("Skipping dataset merge stage.")
 
+if should_run("joint_to_ee"):
+    print("Starting joint-to-end-effector conversion stage...")
+
+    joint_to_ee_cfg = cfg.get("joint_to_ee", {})
+    source_repo_id = joint_to_ee_cfg.get("source_repo_id", merged_repo_id)
+    source_dir = Path(joint_to_ee_cfg.get("source_dir", output_directory)).expanduser()
+
+    output_repo_id = joint_to_ee_cfg.get("output_repo_id", f"{source_repo_id}_ee")
+    output_dir_cfg = joint_to_ee_cfg.get("output_dir")
+    ee_output_directory = (
+        Path(output_dir_cfg).expanduser()
+        if output_dir_cfg is not None
+        else base_dataset_root / output_repo_id
+    )
+
+    feature_keys = joint_to_ee_cfg.get("feature_keys")
+    if isinstance(feature_keys, str):
+        feature_keys = [feature_keys]
+
+    urdf_path = Path(joint_to_ee_cfg.get("urdf_path", MOBILE_AI_URDF_PATH)).expanduser()
+    overwrite = bool(joint_to_ee_cfg.get("overwrite", True))
+
+    source_dataset = None
+    if "merged_dataset" in globals():
+        merged_root = Path(merged_dataset.root).expanduser().resolve()
+        if merged_dataset.repo_id == source_repo_id and merged_root == source_dir.resolve():
+            source_dataset = merged_dataset
+
+    if source_dataset is None:
+        if not source_dir.is_dir():
+            raise FileNotFoundError(f"Joint-to-EE source dataset not found: {source_dir}")
+        print(f"Loading source dataset for joint-to-EE conversion: {source_repo_id} from {source_dir}")
+        source_dataset = LeRobotDataset(repo_id=source_repo_id, root=source_dir)
+
+    converted_dataset = convert_joint_to_ee_and_save_lerobot_dataset(
+        source_dataset=source_dataset,
+        output_repo_id=output_repo_id,
+        output_dir=ee_output_directory,
+        urdf_path=urdf_path,
+        feature_keys=feature_keys,
+        overwrite=overwrite,
+    )
+
+    output_directory = converted_dataset.root
+    print(f"\nSuccessfully created end-effector dataset at: {converted_dataset.root}")
+    print(f"Total episodes in end-effector dataset: {converted_dataset.meta.total_episodes}")
+    print(f"Total frames in end-effector dataset: {converted_dataset.meta.total_frames}")
+else:
+    print("Skipping joint-to-end-effector conversion stage.")
 
 
-# Compress zip the merged dataset for easier sharing and uploading
+# Compress zip the current output dataset for easier sharing and uploading
 if should_run("upload"):
     print("Starting compression and upload stage...")
     zip_output_path = output_directory.with_suffix(".zip")
-    print(f"\nCompressing merged dataset to: {zip_output_path}...")
+    print(f"\nCompressing dataset to: {zip_output_path}...")
     shutil.make_archive(str(output_directory), 'zip', str(output_directory))
     print(f"Dataset compressed successfully to: {zip_output_path}\n")
 
