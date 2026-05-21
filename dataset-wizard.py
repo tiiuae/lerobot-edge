@@ -34,7 +34,7 @@ LEFT_GRIPPER_IDX   = 6
 RIGHT_JOINT_SLICE  = slice(7, 13)  
 RIGHT_GRIPPER_IDX  = 13  
 
-EE_COMPONENTS = ("x", "y", "z", "wx", "wy", "wz")
+EE_COMPONENTS = ("x", "y", "z", "wx", "wy", "wz")  #wx: pitch wy:roll wz:yaw
   
   
 # ── Kinematics solvers (created once, reused per row) ─────────────────────────  
