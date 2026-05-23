@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Robot Dataset Viewer</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="/style.css">
   <!--
     urdf-loader is served from /lib/ (same origin) so the importmap applies.
     Its source uses 'three/examples/jsm/' — both that and 'three/addons/' are
@@ -50,6 +50,8 @@
     <button id="graphBtn" title="Dataset graphs">Graphs</button>
     <button id="calibBtn" title="Joint calibration">⚙</button>
     <button id="helpBtn"  title="Help">?</button>
+    <a href="/wizard" style="margin-left:6px;font-size:12px;color:#8b949e;text-decoration:none;border:1px solid #30363d;border-radius:4px;padding:4px 10px;font-family:monospace" onmouseover="this.style.color='#e6edf3'" onmouseout="this.style.color='#8b949e'">Wizard</a>
+    <a href="/"       style="margin-left:4px;font-size:12px;color:#8b949e;text-decoration:none;border:1px solid #30363d;border-radius:4px;padding:4px 10px;font-family:monospace" onmouseover="this.style.color='#e6edf3'" onmouseout="this.style.color='#8b949e'">← Home</a>
   </header>
 
   <!-- ── Dataset values inspector panel ────────────────────────────── -->
@@ -225,6 +227,6 @@
     <span id="modeInfo" class="mode-info"></span>
   </footer>
 
-  <script type="module" src="main.js"></script>
+  <script type="module" src="/main.js"></script>
 </body>
 </html>

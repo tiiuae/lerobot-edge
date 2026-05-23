@@ -1,4 +1,4 @@
-# Dataset Wizard Guide
+# Dataset Tools
 
 The `dataset-wizard.py` script provides a complete pipeline for managing and merging robotic datasets. It handles dataset format conversion, merging multiple datasets, compression, and uploading to remote SFTP servers.
 
@@ -13,9 +13,104 @@ The Dataset Wizard performs four main stages:
 
 You can start the pipeline from any stage using the `--start-from` option, allowing you to skip previously completed steps.
 
-## Prerequisites
+## Installation
 
-Follow the original README.md file to install lerobot.
+### 1. Install lerobot
+
+From the repository root, install lerobot in editable mode.
+The `kinematics` extra is required for the EE Conversion stage (stage 3).
+
+```bash
+# Base install — Wizard (stages 1–2, 4) + Viewer + Web UI
+pip install -e .
+
+# With EE conversion support (stage 3 — requires placo)
+pip install -e ".[kinematics]"
+```
+
+The following packages are pulled in automatically and are used by the tools:
+
+| Package | Used by |
+|---------|---------|
+| `pyyaml` | Config file parsing |
+| `pyarrow` | Parquet reading in the Viewer |
+| `paramiko` | SFTP upload (stage 4) |
+| `rich` | Console output in `dataset-wizard.py` |
+| `placo` *(kinematics extra)* | Forward-kinematics for EE conversion |
+
+### 2. Verify the `dataset-server` command
+
+After `pip install -e .` the `dataset-server` CLI entry point is registered:
+
+```bash
+dataset-server --help
+```
+
+If the command is not found, confirm the environment's `bin/` is on `PATH`, or run
+the server directly:
+
+```bash
+python tools/server.py --help
+```
+
+---
+
+## Web Interface
+
+The `dataset-server` command starts an HTTP server that hosts three pages:
+
+| URL | Page |
+|-----|------|
+| `http://localhost:8080` | **Landing page** — choose Wizard or Viewer |
+| `http://localhost:8080/wizard` | **Dataset Wizard** — configure and run the pipeline |
+| `http://localhost:8080/viewer` | **Dataset Visualizer** — 3D robot trajectory viewer |
+
+### Starting the server
+
+```bash
+# Default port 8080, cache at /home/edgeai/lerobot/cache
+dataset-server
+
+# Custom port and cache directory
+dataset-server --port 8080 --cache ~/.cache/huggingface/lerobot/your_username
+
+# Or run directly without installing
+python tools/server.py --port 8080 --cache ~/.cache/huggingface/lerobot/your_username
+```
+
+### `--cache` — dataset cache directory
+
+The `--cache` flag sets the root directory the server scans for LeRobot datasets
+(directories containing `meta/info.json`). It defaults to
+`/home/edgeai/lerobot/cache`.
+
+```bash
+dataset-server --cache ~/.cache/huggingface/lerobot/your_username
+```
+
+### Dataset Wizard (web UI)
+
+The wizard at `/wizard` is a browser-based alternative to running
+`dataset-wizard.py` from the CLI. It provides:
+
+- **File browser** — navigate the filesystem to set the base path
+- **Dataset checklist** — select which datasets to include in the merge
+- **Pipeline controls** — choose start/stop stage with live stage highlighting
+- **Collapsible settings** — EE frame, include-action flag, SFTP credentials
+- **Live log** — streaming output via Server-Sent Events while the pipeline runs
+- **Dataset preview** — time-series charts of `observation.state` and `action`
+  columns for any dataset in the cache, episode by episode
+
+The wizard reads and writes `tools/config.yaml` automatically.
+Running the pipeline from the UI is equivalent to running `dataset-wizard.py`
+with the same config file.
+
+### Dataset Visualizer (web UI)
+
+The viewer at `/viewer` is the existing 3D robot visualization tool.
+See [VIEWER_README.md](viewer/VIEWER_README.md) for full documentation.
+
+---
 
 ## Configuration: config.yaml
 
@@ -75,10 +170,19 @@ CLI flags `--ee-frame` and `--ee-include-action` override these config values.
 
 ### Basic Usage
 
-Run the complete pipeline from start to finish:
+Run the complete pipeline from start to finish.
+
+**Via the web UI** (recommended): open `http://localhost:8080/wizard` after
+starting `dataset-server`.
+
+**Via the CLI:**
 
 ```bash
+# From the tools/ directory
 python dataset-wizard.py
+
+# Or from the repo root
+python tools/dataset-wizard.py
 ```
 
 This will:

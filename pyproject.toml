@@ -213,10 +213,12 @@ lerobot-find-joint-limits="lerobot.scripts.lerobot_find_joint_limits:main"
 lerobot-imgtransform-viz="lerobot.scripts.lerobot_imgtransform_viz:main"
 lerobot-edit-dataset="lerobot.scripts.lerobot_edit_dataset:main"
 lerobot-setup-can="lerobot.scripts.lerobot_setup_can:main"
+dataset-server="tools.server:main"
 
 # ---------------- Tool Configurations ----------------
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["src", "."]
+include = ["lerobot*", "tools*"]
 
 [tool.ruff]
 target-version = "py310"

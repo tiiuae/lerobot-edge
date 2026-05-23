@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dataset Tools</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #0d1117;
+      --card:    #161b22;
+      --border:  #30363d;
+      --text:    #e6edf3;
+      --muted:   #8b949e;
+      --accent:  #e34c26;
+      --blue:    #4a9eff;
+      --ok:      #3fb950;
+      --r:       10px;
+      --font:    'Consolas', 'Menlo', 'Monaco', monospace;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 14px;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 24px;
+      gap: 40px;
+    }
+
+    /* ── Header ───────────────────────────────────────── */
+
+    .hero {
+      text-align: center;
+    }
+
+    .hero-title {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: 0.4px;
+      color: var(--text);
+    }
+
+    .hero-sub {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+
+    /* ── Cards ────────────────────────────────────────── */
+
+    .cards {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+      justify-content: center;
+      width: 100%;
+      max-width: 760px;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 32px 28px 24px;
+      flex: 1 1 300px;
+      max-width: 340px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      text-decoration: none;
+      color: inherit;
+      transition: border-color 0.18s, background 0.18s, transform 0.15s;
+      cursor: pointer;
+    }
+
+    .card:hover {
+      border-color: var(--accent);
+      background: #1a1f27;
+      transform: translateY(-2px);
+    }
+
+    .card-icon {
+      font-size: 32px;
+      line-height: 1;
+    }
+
+    .card-title {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+    }
+
+    .card-desc {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.65;
+      flex: 1;
+    }
+
+    .card-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 4px;
+    }
+
+    .tag {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 10px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .card-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--accent);
+      margin-top: 4px;
+    }
+
+    .card-cta::after { content: '→'; }
+
+    /* ── Accent strip on hover ────────────────────────── */
+
+    .card::before {
+      content: '';
+      display: block;
+      height: 3px;
+      border-radius: var(--r) var(--r) 0 0;
+      background: transparent;
+      margin: -32px -28px 28px;
+      transition: background 0.18s;
+    }
+    .card:hover::before { background: var(--accent); }
+
+    /* ── Footer ───────────────────────────────────────── */
+
+    .footer {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    /* ── Scrollbar ────────────────────────────────────── */
+    ::-webkit-scrollbar       { width: 7px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  </style>
+</head>
+<body>
+
+  <div class="hero">
+    <div class="hero-title">Dataset Tools</div>
+    <div class="hero-sub">LeRobot · Trossen Mobile AI</div>
+  </div>
+
+  <div class="cards">
+
+    <a class="card" href="/wizard">
+      <div class="card-icon">🧙</div>
+      <div class="card-title">Dataset Wizard</div>
+      <div class="card-desc">
+        Configure and run the full dataset pipeline — format conversion,
+        dataset merging, end-effector enrichment, and SFTP upload — from
+        a single web interface.
+      </div>
+      <div class="card-tags">
+        <span class="tag">Conversion</span>
+        <span class="tag">Merge</span>
+        <span class="tag">EE Conversion</span>
+        <span class="tag">Upload</span>
+      </div>
+      <span class="card-cta">Open Wizard</span>
+    </a>
+
+    <a class="card" href="/viewer">
+      <div class="card-icon">👁</div>
+      <div class="card-title">Dataset Visualizer</div>
+      <div class="card-desc">
+        Explore recorded robot trajectories in 3D. Inspect joint-space and
+        end-effector data, validate forward-kinematics, compare observation
+        vs action, and visualise EE deltas and relative actions.
+      </div>
+      <div class="card-tags">
+        <span class="tag">3D Viewer</span>
+        <span class="tag">Joint Space</span>
+        <span class="tag">EE Analysis</span>
+        <span class="tag">FK Validation</span>
+      </div>
+      <span class="card-cta">Open Viewer</span>
+    </a>
+
+  </div>
+
+  <div class="footer">python tools/server.py · dataset-server</div>
+
+</body>
+</html>
