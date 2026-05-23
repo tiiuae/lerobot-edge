@@ -33,8 +33,8 @@ TOOLS_DIR     = Path(__file__).parent
 VIEWER_DIR    = TOOLS_DIR / "viewer"
 CONFIG_PATH   = TOOLS_DIR / "config.yaml"
 WIZARD_SCRIPT = TOOLS_DIR / "dataset-wizard.py"
-
-URDF_PATH   = TOOLS_DIR / "assets" / "mobile_ai.urdf"
+TROSSEN_DIR   = TOOLS_DIR / "assets" / "trossen_arm_description"
+URDF_PATH     = TROSSEN_DIR / "urdf" / "generated" / "mobile_ai.urdf"
 
 mimetypes.add_type("application/javascript", ".js")
 mimetypes.add_type("text/css",               ".css")

@@ -1,0 +1,12 @@
+# Override root .gitignore rules that would exclude robot asset files.
+# Root .gitignore has *.stl, *.urdf, *.xml — negate them for this directory.
+!*.stl
+!*.dae
+!*.urdf
+!*.xml
+!*.png
+
+# Still exclude actual noise
+__pycache__/
+*.py[cod]
+.DS_Store
