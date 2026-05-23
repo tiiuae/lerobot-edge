@@ -4,18 +4,19 @@
 Enrich a LeRobot dataset (wxai / Mobile AI dual-arm robot) with:
 
   1. End-effector poses  (FK via lerobot.model.kinematics / placo)
-       observation.ee_left   [7]  [x, y, z, qw, qx, qy, qz]  from state joints
-       observation.ee_right  [7]  same for right arm
-       action.ee_left        [7]  from action joints  (--include-action)
-       action.ee_right       [7]  same for right arm  (--include-action)
+       observation.ee_left   [8]  [x, y, z, qw, qx, qy, qz, gripper]  from state joints
+       observation.ee_right  [8]  same for right arm
+       action.ee_left        [8]  from action joints  (--include-action)
+       action.ee_right       [8]  same for right arm  (--include-action)
+     gripper is normalized to [0, 1]: 0 = closed, 1 = open (from URDF carriage joint limits)
 
   2. Action representations  (delta and relative, per episode)
        action.delta             [16]  action[t] - action[t-1]  (t=0: vs state)
        action.relative          [16]  action[t] - state[t]     (joint dims only)
-       action.ee_left.delta     [7]   sequential EE delta      (--include-action)
-       action.ee_right.delta    [7]   sequential EE delta      (--include-action)
-       action.ee_left.relative  [7]   action EE - obs EE       (--include-action)
-       action.ee_right.relative [7]   action EE - obs EE       (--include-action)
+       action.ee_left.delta     [8]   sequential EE delta      (--include-action)
+       action.ee_right.delta    [8]   sequential EE delta      (--include-action)
+       action.ee_left.relative  [8]   action EE - obs EE       (--include-action)
+       action.ee_right.relative [8]   action EE - obs EE       (--include-action)
 
 JOINT LAYOUT  (arms-first — ignores mislabeled metadata):
   state[0..6]    = left_joint_0..6   (joint_6 = gripper, excluded from FK)
@@ -80,6 +81,11 @@ _ACT_RIGHT_JOINTS = list(range(7, 13))  # action[7..12]
 _ACT_DIM       = 16   # total action vector length
 _ACT_JOINT_DIM = 14   # action[0..13] are joint positions (both arms)
 
+_LEFT_GRIPPER_IDX  = 6    # state[6]  / action[6]
+_RIGHT_GRIPPER_IDX = 13   # state[13] / action[13]
+_GRIPPER_OPEN   = 0.044   # m, from URDF left/right_carriage_joint upper limit
+_GRIPPER_CLOSED = 0.0     # m
+
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -136,9 +142,15 @@ def _se3_to_pose7(tf: np.ndarray) -> np.ndarray:
     )
 
 
-def _fk_pose(kin: RobotKinematics, q_arr: np.ndarray, joint_idx: list[int],
-             mount_xyz: np.ndarray | None) -> np.ndarray:
-    return _se3_to_pose7(_apply_mount(_arm_fk(kin, q_arr[joint_idx]), mount_xyz))
+def _normalize_gripper(val: float) -> float:
+    return float(np.clip((val - _GRIPPER_CLOSED) / (_GRIPPER_OPEN - _GRIPPER_CLOSED), 0.0, 1.0))
+
+
+def _fk_pose8(kin: RobotKinematics, q_arr: np.ndarray, joint_idx: list[int],
+              mount_xyz: np.ndarray | None, gripper_val: float) -> np.ndarray:
+    """FK pose [x,y,z,qw,qx,qy,qz] + normalized gripper → [8] float32."""
+    pose7 = _se3_to_pose7(_apply_mount(_arm_fk(kin, q_arr[joint_idx]), mount_xyz))
+    return np.append(pose7, np.float32(_normalize_gripper(gripper_val)))
 
 
 # ── per-parquet processing ────────────────────────────────────────────────────
@@ -158,18 +170,18 @@ def _enrich_table(
     states     = [np.asarray(s, np.float64) for s in tbl["observation.state"].to_pylist()]
     actions    = [np.asarray(a, np.float64) for a in tbl["action"].to_pylist()]
 
-    # Output buffers
-    obs_ee_L = np.zeros((n, 7), np.float32)
-    obs_ee_R = np.zeros((n, 7), np.float32)
-    act_ee_L = np.zeros((n, 7), np.float32) if include_action else None
-    act_ee_R = np.zeros((n, 7), np.float32) if include_action else None
+    # Output buffers — EE is 8-dim: [x, y, z, qw, qx, qy, qz, gripper_normalized]
+    obs_ee_L = np.zeros((n, 8), np.float32)
+    obs_ee_R = np.zeros((n, 8), np.float32)
+    act_ee_L = np.zeros((n, 8), np.float32) if include_action else None
+    act_ee_R = np.zeros((n, 8), np.float32) if include_action else None
 
     act_delta    = np.zeros((n, _ACT_DIM), np.float32)
     act_rel      = np.zeros((n, _ACT_DIM), np.float32)
-    ee_L_delta   = np.zeros((n, 7), np.float32) if include_action else None
-    ee_R_delta   = np.zeros((n, 7), np.float32) if include_action else None
-    ee_L_rel     = np.zeros((n, 7), np.float32) if include_action else None
-    ee_R_rel     = np.zeros((n, 7), np.float32) if include_action else None
+    ee_L_delta   = np.zeros((n, 8), np.float32) if include_action else None
+    ee_R_delta   = np.zeros((n, 8), np.float32) if include_action else None
+    ee_L_rel     = np.zeros((n, 8), np.float32) if include_action else None
+    ee_R_rel     = np.zeros((n, 8), np.float32) if include_action else None
 
     # Group rows by episode, sort by frame_index for correct delta ordering
     ep_rows: dict[int, list[tuple[int, int]]] = defaultdict(list)
@@ -187,13 +199,13 @@ def _enrich_table(
             state  = states[row_i]
             action = actions[row_i]
 
-            # ── EE poses via FK ────────────────────────────────────────────
-            obs_ee_L[row_i] = _fk_pose(kin, state,  _OBS_LEFT_JOINTS,  left_mount)
-            obs_ee_R[row_i] = _fk_pose(kin, state,  _OBS_RIGHT_JOINTS, right_mount)
+            # ── EE poses via FK (+ normalized gripper as 8th dim) ─────────
+            obs_ee_L[row_i] = _fk_pose8(kin, state,  _OBS_LEFT_JOINTS,  left_mount,  state[_LEFT_GRIPPER_IDX])
+            obs_ee_R[row_i] = _fk_pose8(kin, state,  _OBS_RIGHT_JOINTS, right_mount, state[_RIGHT_GRIPPER_IDX])
 
             if include_action:
-                act_ee_L[row_i] = _fk_pose(kin, action, _ACT_LEFT_JOINTS,  left_mount)
-                act_ee_R[row_i] = _fk_pose(kin, action, _ACT_RIGHT_JOINTS, right_mount)
+                act_ee_L[row_i] = _fk_pose8(kin, action, _ACT_LEFT_JOINTS,  left_mount,  action[_LEFT_GRIPPER_IDX])
+                act_ee_R[row_i] = _fk_pose8(kin, action, _ACT_RIGHT_JOINTS, right_mount, action[_RIGHT_GRIPPER_IDX])
 
             # ── joint action delta ─────────────────────────────────────────
             # t=0: delta vs state joint positions (no prior action exists)
@@ -261,13 +273,14 @@ def _enrich_table(
 def _feature_ee(side: str, frame_label: str) -> dict:
     return {
         "dtype": "float32",
-        "shape": [7],
-        "names": [f"ee_{side}_{n}" for n in ["x", "y", "z", "qw", "qx", "qy", "qz"]],
+        "shape": [8],
+        "names": [f"ee_{side}_{n}" for n in ["x", "y", "z", "qw", "qx", "qy", "qz", "gripper"]],
         "description": (
             f"End-effector pose of the {side} wxai arm "
-            f"([x,y,z,qw,qx,qy,qz] in {frame_label} frame). "
-            "FK from joint_0..joint_5 via lerobot.model.kinematics (placo), "
-            "wxai_follower.urdf."
+            f"([x,y,z,qw,qx,qy,qz,gripper] in {frame_label} frame). "
+            "FK from joint_0..joint_5 via lerobot.model.kinematics (placo), wxai_follower.urdf. "
+            f"gripper = joint_6 normalized to [0,1]: 0=closed, 1=open "
+            f"(URDF carriage joint range [0, {_GRIPPER_OPEN}] m)."
         ),
     }
 
@@ -298,13 +311,13 @@ def _update_info_json(info_path: Path, include_action: bool, ref_frame: str) -> 
         feats["action.ee_left"]           = _feature_ee("left",  fl)
         feats["action.ee_right"]          = _feature_ee("right", fl)
         feats["action.ee_left.delta"]     = _feature_repr(
-            7, "Sequential delta of left EE action pose. t=0: action_ee-obs_ee.")
+            8, "Sequential delta of left EE action pose [xyz,quat,gripper]. t=0: action_ee-obs_ee.")
         feats["action.ee_right.delta"]    = _feature_repr(
-            7, "Sequential delta of right EE action pose. t=0: action_ee-obs_ee.")
+            8, "Sequential delta of right EE action pose [xyz,quat,gripper]. t=0: action_ee-obs_ee.")
         feats["action.ee_left.relative"]  = _feature_repr(
-            7, "Left EE action relative to current obs EE: action.ee_left[t]-observation.ee_left[t].")
+            8, "Left EE action relative to current obs EE: action.ee_left[t]-observation.ee_left[t].")
         feats["action.ee_right.relative"] = _feature_repr(
-            7, "Right EE action relative to current obs EE: action.ee_right[t]-observation.ee_right[t].")
+            8, "Right EE action relative to current obs EE: action.ee_right[t]-observation.ee_right[t].")
 
     info_path.write_text(json.dumps(info, indent=2))
 
