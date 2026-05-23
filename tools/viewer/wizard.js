@@ -5,6 +5,7 @@
 let _browserTarget = null;  // input element that triggered the file browser
 let _browserPath   = null;  // path currently shown in file browser
 let _currentJob    = null;  // active EventSource
+let _datasetMeta   = {};    // path → { state_names, action_names }
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 
@@ -56,7 +57,7 @@ async function loadConfig() {
         if (sftp.hostname)    set('sftp-hostname', sftp.hostname);
         if (sftp.port)        set('sftp-port',     sftp.port);
         if (sftp.username)    set('sftp-username',  sftp.username);
-        if (sftp.password)    set('sftp-password',  sftp.password);
+        // password intentionally not loaded — must be entered each session
         if (sftp.remote_path) set('sftp-remote',    sftp.remote_path);
 
         updatePipelineHighlight();
@@ -269,6 +270,13 @@ async function loadPreviewDatasets() {
     const cur = sel.value;
     try {
         const datasets = await api('/api/datasets');
+        _datasetMeta = {};
+        for (const d of datasets) {
+            _datasetMeta[d.path] = {
+                state_names:  d.state_names  || [],
+                action_names: d.action_names || [],
+            };
+        }
         sel.innerHTML = '<option value="">— select —</option>'
             + datasets.map(d =>
                 `<option value="${d.path}"${d.path === cur ? ' selected' : ''}>${d.name}</option>`
@@ -339,6 +347,10 @@ function renderPreview(frames) {
     const stateDim   = stateData[0]?.length  ?? 0;
     const actionDim  = actionData[0]?.length ?? 0;
 
+    const meta        = _datasetMeta[get('preview-dataset')] || {};
+    const stateNames  = meta.state_names  || [];
+    const actionNames = meta.action_names || [];
+
     const body = document.getElementById('preview-body');
     body.innerHTML = `
         <div class="preview-info">
@@ -350,15 +362,34 @@ function renderPreview(frames) {
             <div class="chart-wrap">
                 <div class="chart-title">observation.state — ${stateDim} dims</div>
                 <canvas id="chart-state"  class="chart-canvas" width="780" height="180"></canvas>
+                <div id="legend-state" class="chart-legend"></div>
             </div>
             <div class="chart-wrap">
                 <div class="chart-title">action — ${actionDim} dims</div>
                 <canvas id="chart-action" class="chart-canvas" width="780" height="180"></canvas>
+                <div id="legend-action" class="chart-legend"></div>
             </div>
         </div>`;
 
-    if (stateData.length  > 1) drawLineChart(document.getElementById('chart-state'),  stateData);
-    if (actionData.length > 1) drawLineChart(document.getElementById('chart-action'), actionData);
+    if (stateData.length  > 1) {
+        drawLineChart(document.getElementById('chart-state'),  stateData);
+        renderLegend(document.getElementById('legend-state'),  stateDim,  stateNames);
+    }
+    if (actionData.length > 1) {
+        drawLineChart(document.getElementById('chart-action'), actionData);
+        renderLegend(document.getElementById('legend-action'), actionDim, actionNames);
+    }
+}
+
+function renderLegend(container, nSeries, names) {
+    container.innerHTML = Array.from({ length: nSeries }, (_, i) => {
+        const color = PALETTE[i % PALETTE.length];
+        const label = names[i] ?? `dim ${i}`;
+        return `<span class="legend-item">
+            <span class="legend-dot" style="background:${color}"></span
+            ><span class="legend-label">${label}</span>
+        </span>`;
+    }).join('');
 }
 
 // ── Chart rendering ───────────────────────────────────────────────────────────
