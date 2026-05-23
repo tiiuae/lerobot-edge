@@ -1061,12 +1061,41 @@ function updateDataPanel(frame) {
   }
 }
 
-// ── Graphs panel ─────────────────────────────────────────────────────────────
-const SERIES_COLORS = ['#ff6b6b','#ffa94d','#ffd43b','#69db7c','#74c0fc','#da77f2','#f8a5c2'];
-const CHART_H = 72;
+// ── Graphs panel (Chart.js) ───────────────────────────────────────────────────
 
-let graphChartData = [];  // [{ title, series: [{data, color, label}] }]
-let graphCanvases  = [];
+const SERIES_COLORS = ['#ff6b6b','#ffa94d','#ffd43b','#69db7c','#74c0fc','#da77f2','#f8a5c2'];
+
+let graphInstances = [];  // Chart.js instances
+
+// Custom plugin: draws the current-frame cursor line + value dots on every chart
+const frameCursorPlugin = {
+  id: 'frameCursor',
+  afterDatasetsDraw(chart) {
+    const { ctx, chartArea, scales } = chart;
+    if (!chartArea || !scales.x) return;
+    const x = scales.x.getPixelForValue(frameIdx);
+    if (x < chartArea.left || x > chartArea.right) return;
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+    ctx.lineWidth   = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, chartArea.top);
+    ctx.lineTo(x, chartArea.bottom);
+    ctx.stroke();
+
+    for (const ds of chart.data.datasets) {
+      const v = ds.data[frameIdx];
+      if (v == null) continue;
+      const y = scales.y.getPixelForValue(v);
+      ctx.fillStyle = ds.borderColor;
+      ctx.beginPath();
+      ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  },
+};
 
 function setupGraphPanel() {
   const btn   = document.getElementById('graphBtn');
@@ -1084,14 +1113,18 @@ function setupGraphPanel() {
 }
 
 function buildGraphCharts() {
-  graphChartData = [];
-  graphCanvases  = [];
+  for (const c of graphInstances) c.destroy();
+  graphInstances = [];
+
   const body = document.getElementById('graphPanelBody');
   body.innerHTML = '';
   if (!frames.length) return;
 
+  const C = window.Chart;
+  if (!C) { console.warn('Chart.js not loaded'); return; }
+
   const sample = frames[0];
-  const dpr    = window.devicePixelRatio || 1;
+  const labels = Array.from({ length: frames.length }, (_, i) => i);
 
   function colData(key, idx) {
     return frames.map(f => { const a = f[key]; return (a && idx < a.length) ? a[idx] : null; });
@@ -1101,149 +1134,138 @@ function buildGraphCharts() {
     const group = document.createElement('div');
     group.className = 'chart-group';
 
-    const titleEl = document.createElement('div');
-    titleEl.className = 'chart-title';
-    titleEl.textContent = title;
-    group.appendChild(titleEl);
+    const cjWrap = document.createElement('div');
+    cjWrap.className = 'chart-cj-wrap';
 
     const canvas = document.createElement('canvas');
-    canvas.className = 'chart-canvas';
-    canvas.style.height = CHART_H + 'px';
-    canvas.height = CHART_H * dpr;
-    group.appendChild(canvas);
-
-    const legend = document.createElement('div');
-    legend.className = 'chart-legend';
-    for (const s of series) {
-      const sp = document.createElement('span');
-      sp.className = 'cleg';
-      sp.style.color = s.color;
-      sp.textContent = s.label;
-      legend.appendChild(sp);
-    }
-    group.appendChild(legend);
-
+    cjWrap.appendChild(canvas);
+    group.appendChild(cjWrap);
     body.appendChild(group);
-    graphChartData.push({ title, series });
-    graphCanvases.push(canvas);
 
-    canvas.addEventListener('click', e => {
-      const rect = canvas.getBoundingClientRect();
-      const idx  = Math.round(((e.clientX - rect.left) / rect.width) * (frames.length - 1));
-      stopPlayback();
-      updateFrame(Math.max(0, Math.min(idx, frames.length - 1)));
+    const inst = new C(canvas, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: series.map(s => ({
+          label:           s.label,
+          data:            s.data,
+          borderColor:     s.color,
+          backgroundColor: 'transparent',
+          borderWidth:     1.2,
+          pointRadius:     0,
+          tension:         0,
+        })),
+      },
+      options: {
+        responsive:          true,
+        maintainAspectRatio: false,
+        animation:           false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          title: {
+            display: true,
+            text:    title,
+            color:   '#8b949e',
+            font:    { size: 9, family: 'Consolas, monospace', weight: '700' },
+            padding: { top: 4, bottom: 2 },
+            align:   'start',
+          },
+          legend: {
+            labels: {
+              color:    '#8b949e',
+              font:     { size: 9, family: 'Consolas, monospace' },
+              boxWidth: 12,
+              boxHeight: 2,
+              padding:  6,
+            },
+          },
+          tooltip: {
+            backgroundColor: '#161b22',
+            borderColor:     '#30363d',
+            borderWidth:     1,
+            titleColor:      '#8b949e',
+            bodyColor:       '#e6edf3',
+            bodyFont:        { size: 9, family: 'Consolas, monospace' },
+            callbacks: {
+              title: items => `frame ${items[0].label}`,
+              label: item  => ` ${item.dataset.label}: ${item.parsed.y?.toFixed(4)}`,
+            },
+          },
+          zoom: {
+            zoom: { wheel: { enabled: true }, mode: 'x' },
+            pan:  { enabled: true, mode: 'x' },
+            limits: { x: { min: 'original', max: 'original' } },
+          },
+        },
+        onClick(_evt, _elems, chart) {
+          const pts = chart.getElementsAtEventForMode(_evt, 'index', { intersect: false }, false);
+          if (!pts.length) return;
+          stopPlayback();
+          updateFrame(Math.max(0, Math.min(pts[0].index, frames.length - 1)));
+        },
+        scales: {
+          x: {
+            ticks:  { color: '#484f58', font: { size: 8, family: 'Consolas, monospace' }, maxTicksLimit: 6 },
+            grid:   { color: '#21262d' },
+            border: { color: '#30363d' },
+          },
+          y: {
+            ticks:  { color: '#484f58', font: { size: 8, family: 'Consolas, monospace' }, maxTicksLimit: 4 },
+            grid:   { color: '#21262d' },
+            border: { color: '#30363d' },
+          },
+        },
+      },
+      plugins: [frameCursorPlugin],
     });
+
+    graphInstances.push(inst);
   }
 
   function defineNamedArray(frameKey, baseTitle, names) {
     if (!sample[frameKey]) return;
-    const arr   = sample[frameKey];
+    const arr = sample[frameKey];
     const left = [], right = [], extra = [];
     for (let i = 0; i < arr.length; i++) {
       const name = names[i] || `[${i}]`;
       const dest = name.startsWith('left_') ? left : name.startsWith('right_') ? right : extra;
       dest.push({ i, name });
     }
-    for (const [grp, label] of [[left,'Left'],[right,'Right'],[extra,'Extra']]) {
+    for (const [grp, lbl] of [[left,'Left'],[right,'Right'],[extra,'Extra']]) {
       if (!grp.length) continue;
-      const series = grp.map(({ i, name }, j) => ({
+      addGroup(`${baseTitle} — ${lbl}`, grp.map(({ i, name }, j) => ({
         data:  colData(frameKey, i),
         color: SERIES_COLORS[j % SERIES_COLORS.length],
         label: name.replace(/^left_/,'').replace(/^right_/,''),
-      }));
-      addGroup(`${baseTitle} — ${label}`, series);
+      })));
     }
   }
 
   function defineVec(frameKey, title, dims) {
     if (!sample[frameKey]) return;
-    const posColors = ['#ff6b6b','#69db7c','#74c0fc'];
-    const colors = dims === 3 ? posColors
-                             : [...posColors,'#da77f2','#ffa94d','#ffd43b','#f8a5c2'];
-    const labels = dims === 3 ? ['dx','dy','dz'] : ['x','y','z','qw','qx','qy','qz'];
-    const series = Array.from({length: dims}, (_, i) => ({
-      data:  colData(frameKey, i),
-      color: colors[i],
-      label: labels[i],
-    }));
-    addGroup(title, series);
+    const posC  = ['#ff6b6b','#69db7c','#74c0fc'];
+    const colors = dims === 3 ? posC : [...posC,'#da77f2','#ffa94d','#ffd43b','#f8a5c2'];
+    const lbls   = dims === 3 ? ['dx','dy','dz'] : ['x','y','z','qw','qx','qy','qz'];
+    addGroup(title, Array.from({ length: dims }, (_, i) => ({
+      data: colData(frameKey, i), color: colors[i], label: lbls[i],
+    })));
   }
 
   defineNamedArray('observation.state', 'State',  stateNames);
   defineNamedArray('action',            'Action', actionNames);
-  defineVec('observation.ee_left',       'Obs EE Left',      7);
-  defineVec('observation.ee_right',      'Obs EE Right',     7);
-  defineVec('action.ee_left',            'Action EE Left',   7);
-  defineVec('action.ee_right',           'Action EE Right',  7);
-  defineVec('action.ee_left.delta',      'EE Delta Left',    3);
-  defineVec('action.ee_right.delta',     'EE Delta Right',   3);
-  defineVec('action.ee_left.relative',   'EE Rel Left',      3);
-  defineVec('action.ee_right.relative',  'EE Rel Right',     3);
-}
-
-function drawChart(canvas, series, fidx) {
-  const dpr  = window.devicePixelRatio || 1;
-  const cssW = canvas.clientWidth || 340;
-  if (canvas.width !== Math.round(cssW * dpr)) canvas.width = Math.round(cssW * dpr);
-
-  const ctx = canvas.getContext('2d');
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const W = cssW, H = CHART_H;
-
-  ctx.fillStyle = '#0d1117';
-  ctx.fillRect(0, 0, W, H);
-
-  let lo = Infinity, hi = -Infinity;
-  for (const { data } of series)
-    for (const v of data)
-      if (v != null && isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
-  if (!isFinite(lo)) return;
-  if (lo === hi) { lo -= 0.5; hi += 0.5; }
-  const pad = (hi - lo) * 0.06;
-  lo -= pad; hi += pad;
-
-  const n   = series[0]?.data.length || 1;
-  const toX = i => (i / Math.max(n - 1, 1)) * W;
-  const toY = v => H - ((v - lo) / (hi - lo)) * H;
-
-  if (lo < 0 && hi > 0) {
-    const y0 = toY(0);
-    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([3, 4]);
-    ctx.beginPath(); ctx.moveTo(0, y0); ctx.lineTo(W, y0); ctx.stroke();
-    ctx.setLineDash([]);
-  }
-
-  for (const { data, color } of series) {
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    let moved = false;
-    for (let i = 0; i < n; i++) {
-      if (data[i] == null) { moved = false; continue; }
-      moved ? ctx.lineTo(toX(i), toY(data[i])) : (ctx.moveTo(toX(i), toY(data[i])), (moved = true));
-    }
-    ctx.stroke();
-  }
-
-  if (fidx >= 0 && n > 1) {
-    const cx = toX(fidx);
-    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-    ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, H); ctx.stroke();
-    for (const { data, color } of series) {
-      if (data[fidx] == null) continue;
-      ctx.fillStyle = color;
-      ctx.beginPath(); ctx.arc(cx, toY(data[fidx]), 2.5, 0, Math.PI * 2); ctx.fill();
-    }
-  }
+  defineVec('observation.ee_left',      'Obs EE Left',      7);
+  defineVec('observation.ee_right',     'Obs EE Right',     7);
+  defineVec('action.ee_left',           'Action EE Left',   7);
+  defineVec('action.ee_right',          'Action EE Right',  7);
+  defineVec('action.ee_left.delta',     'EE Delta Left',    3);
+  defineVec('action.ee_right.delta',    'EE Delta Right',   3);
+  defineVec('action.ee_left.relative',  'EE Rel Left',      3);
+  defineVec('action.ee_right.relative', 'EE Rel Right',     3);
 }
 
 function renderAllCharts() {
   if (document.getElementById('graphPanel').classList.contains('hidden')) return;
-  for (let i = 0; i < graphCanvases.length; i++)
-    drawChart(graphCanvases[i], graphChartData[i].series, frameIdx);
+  for (const chart of graphInstances) chart.update('none');
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────

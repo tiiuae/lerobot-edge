@@ -551,7 +551,8 @@ footer label {
 }
 .graph-panel-hdr button:hover { color: var(--text); }
 
-.chart-group { margin-bottom: 10px; }
+.chart-group    { margin-bottom: 10px; }
+.chart-cj-wrap  { position: relative; height: 160px; }
 
 .chart-title {
   font-size: 9px;

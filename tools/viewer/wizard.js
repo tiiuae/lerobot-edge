@@ -2,10 +2,11 @@
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
-let _browserTarget = null;  // input element that triggered the file browser
-let _browserPath   = null;  // path currently shown in file browser
-let _currentJob    = null;  // active EventSource
-let _datasetMeta   = {};    // path → { state_names, action_names }
+let _browserTarget  = null;  // input element that triggered the file browser
+let _browserPath    = null;  // path currently shown in file browser
+let _currentJob     = null;  // active EventSource
+let _datasetMeta    = {};    // path → { state_names, action_names }
+let _previewCharts  = [];    // active Chart.js instances in preview panel
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 
@@ -342,6 +343,10 @@ function previewMsg(text) {
 }
 
 function renderPreview(frames) {
+    // destroy previous Chart.js instances
+    for (const c of _previewCharts) c.destroy();
+    _previewCharts = [];
+
     const stateData  = frames.map(f => f['observation.state']).filter(Boolean);
     const actionData = frames.map(f => f['action']).filter(Boolean);
     const stateDim   = stateData[0]?.length  ?? 0;
@@ -361,35 +366,28 @@ function renderPreview(frames) {
         <div class="charts-grid">
             <div class="chart-wrap">
                 <div class="chart-title">observation.state — ${stateDim} dims</div>
-                <canvas id="chart-state"  class="chart-canvas" width="780" height="180"></canvas>
-                <div id="legend-state" class="chart-legend"></div>
+                <div class="chart-cj-container"><canvas id="chart-state"></canvas></div>
             </div>
             <div class="chart-wrap">
                 <div class="chart-title">action — ${actionDim} dims</div>
-                <canvas id="chart-action" class="chart-canvas" width="780" height="180"></canvas>
-                <div id="legend-action" class="chart-legend"></div>
+                <div class="chart-cj-container"><canvas id="chart-action"></canvas></div>
             </div>
         </div>`;
 
     if (stateData.length  > 1) {
-        drawLineChart(document.getElementById('chart-state'),  stateData);
-        renderLegend(document.getElementById('legend-state'),  stateDim,  stateNames);
+        const c = makeWizardChart(
+            document.getElementById('chart-state'), stateData, stateNames,
+            'observation.state'
+        );
+        if (c) _previewCharts.push(c);
     }
     if (actionData.length > 1) {
-        drawLineChart(document.getElementById('chart-action'), actionData);
-        renderLegend(document.getElementById('legend-action'), actionDim, actionNames);
+        const c = makeWizardChart(
+            document.getElementById('chart-action'), actionData, actionNames,
+            'action'
+        );
+        if (c) _previewCharts.push(c);
     }
-}
-
-function renderLegend(container, nSeries, names) {
-    container.innerHTML = Array.from({ length: nSeries }, (_, i) => {
-        const color = PALETTE[i % PALETTE.length];
-        const label = names[i] ?? `dim ${i}`;
-        return `<span class="legend-item">
-            <span class="legend-dot" style="background:${color}"></span
-            ><span class="legend-label">${label}</span>
-        </span>`;
-    }).join('');
 }
 
 // ── Chart rendering ───────────────────────────────────────────────────────────
@@ -401,66 +399,75 @@ const PALETTE = [
     '#fb923c','#2dd4bf','#e879f9','#4ade80','#fbbf24',
 ];
 
-function drawLineChart(canvas, data) {
-    if (!data || data.length < 2 || !data[0]?.length) return;
-    const ctx = canvas.getContext('2d');
-    const W = canvas.width, H = canvas.height;
-    const pL = 44, pR = 8, pT = 8, pB = 18;
+function makeWizardChart(canvas, data, names, title) {
+    if (!data || data.length < 2 || !data[0]?.length) return null;
+    const nDim   = data[0].length;
+    const labels = data.map((_, i) => i);
 
-    ctx.fillStyle = '#0d1117';
-    ctx.fillRect(0, 0, W, H);
+    const datasets = Array.from({ length: nDim }, (_, s) => ({
+        label:       names[s] ?? `dim ${s}`,
+        data:        data.map(row => row[s]),
+        borderColor: PALETTE[s % PALETTE.length],
+        backgroundColor: PALETTE[s % PALETTE.length] + '22',
+        borderWidth: 1.5,
+        pointRadius: 0,
+        tension:     0,
+    }));
 
-    const nF = data.length;
-    const nS = data[0].length;
-
-    let min = Infinity, max = -Infinity;
-    for (const row of data) {
-        for (const v of row) {
-            if (isFinite(v)) { if (v < min) min = v; if (v > max) max = v; }
-        }
-    }
-    const range = max - min || 1;
-    const scX = (W - pL - pR) / (nF - 1);
-    const scY = (H - pT - pB) / range;
-
-    // Grid
-    ctx.strokeStyle = '#21262d';
-    ctx.lineWidth   = 1;
-    ctx.font        = '9px monospace';
-    ctx.fillStyle   = '#484f58';
-    ctx.textAlign   = 'right';
-    const steps = 4;
-    for (let i = 0; i <= steps; i++) {
-        const y   = pT + (H - pT - pB) * i / steps;
-        const val = max - range * i / steps;
-        ctx.beginPath(); ctx.moveTo(pL, y); ctx.lineTo(W - pR, y); ctx.stroke();
-        ctx.fillText(val.toFixed(2), pL - 3, y + 3);
-    }
-
-    // Series
-    for (let s = 0; s < nS; s++) {
-        ctx.beginPath();
-        ctx.strokeStyle = PALETTE[s % PALETTE.length];
-        ctx.lineWidth   = 1.2;
-        let first = true;
-        for (let i = 0; i < nF; i++) {
-            const v = data[i][s];
-            if (!isFinite(v)) continue;
-            const x = pL + i * scX;
-            const y = pT + (max - v) * scY;
-            first ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-            first = false;
-        }
-        ctx.stroke();
-    }
-
-    // Frame labels
-    ctx.fillStyle  = '#484f58';
-    ctx.font       = '9px monospace';
-    ctx.textAlign  = 'left';
-    ctx.fillText('0', pL, H - 2);
-    ctx.textAlign = 'right';
-    ctx.fillText(String(nF - 1), W - pR, H - 2);
+    return new Chart(canvas, {
+        type: 'line',
+        data: { labels, datasets },
+        options: {
+            animation:            false,
+            maintainAspectRatio:  false,
+            responsive:           true,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: {
+                    display:  true,
+                    position: 'bottom',
+                    labels: {
+                        color:    '#8b949e',
+                        boxWidth: 10,
+                        font:     { size: 10, family: 'Consolas,Menlo,Monaco,monospace' },
+                    },
+                },
+                title: { display: false },
+                tooltip: {
+                    backgroundColor: '#161b22',
+                    borderColor:     '#30363d',
+                    borderWidth:     1,
+                    titleColor:      '#8b949e',
+                    bodyColor:       '#e6edf3',
+                    titleFont:       { family: 'Consolas,Menlo,Monaco,monospace', size: 10 },
+                    bodyFont:        { family: 'Consolas,Menlo,Monaco,monospace', size: 10 },
+                    callbacks: {
+                        title: items => `frame ${items[0].label}`,
+                        label: item  => ` ${item.dataset.label}: ${item.raw.toFixed(4)}`,
+                    },
+                },
+                zoom: {
+                    pan:   { enabled: true,  mode: 'x' },
+                    zoom:  { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' },
+                },
+            },
+            scales: {
+                x: {
+                    ticks: {
+                        color:    '#484f58',
+                        maxRotation: 0,
+                        font:     { size: 9 },
+                        maxTicksLimit: 8,
+                    },
+                    grid: { color: '#21262d' },
+                },
+                y: {
+                    ticks: { color: '#484f58', font: { size: 9 } },
+                    grid:  { color: '#21262d' },
+                },
+            },
+        },
+    });
 }
 
 // ── File browser ──────────────────────────────────────────────────────────────
