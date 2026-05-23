@@ -72,6 +72,8 @@ def parse_args():
                    help="EE reference frame (overrides config ee_frame)")
     p.add_argument("--ee-include-action", action="store_true", default=None,
                    help="Also compute EE and representations for action joints")
+    p.add_argument("--no-ee-joint-repr", action="store_true", default=False,
+                   help="Skip joint-space action representations (action.delta, action.relative)")
     return p.parse_args()
 
 
@@ -186,12 +188,16 @@ else:
 # ── Stage 3: EE Conversion ────────────────────────────────────────────────────
 
 if should_run("ee_conversion"):
-    ee_cfg         = cfg.get("joint_to_ee", {})
-    ref_frame      = args.ee_frame or ee_cfg.get("ee_frame") or cfg.get("ee_frame")
-    include_action = (
+    ee_cfg              = cfg.get("joint_to_ee", {})
+    ref_frame           = args.ee_frame or ee_cfg.get("ee_frame") or cfg.get("ee_frame")
+    include_action      = (
         args.ee_include_action
         or ee_cfg.get("include_action", False)
         or cfg.get("ee_include_action", False)
+    )
+    include_joint_repr  = (
+        not args.no_ee_joint_repr
+        and ee_cfg.get("include_joint_repr", True)
     )
 
     if ref_frame is None:
@@ -210,6 +216,7 @@ if should_run("ee_conversion"):
                 output_root=output_directory,   # in-place
                 ref_frame=ref_frame,
                 include_action=include_action,
+                include_joint_repr=include_joint_repr,
             )
         except ValueError as exc:
             console.print(Panel(

@@ -111,8 +111,14 @@
             </select>
           </div>
           <label class="checkbox-label">
+            <input type="checkbox" id="ee-include-joint-repr" checked>
+            Include joint representations
+            <span class="field-hint">(action.delta, action.relative)</span>
+          </label>
+          <label class="checkbox-label">
             <input type="checkbox" id="ee-include-action" checked>
-            Include action EE
+            Include action EE + representations
+            <span class="field-hint">(action.ee_left/right, delta, relative)</span>
           </label>
         </div>
       </details>

@@ -329,6 +329,7 @@ button {
 }
 .checkbox-label input      { accent-color: var(--accent); }
 .checkbox-label:hover      { color: var(--text); }
+.field-hint { color: var(--muted); opacity: .65; font-size: 10px; }
 
 /* ── Run controls ────────────────────────────────────────────── */
 

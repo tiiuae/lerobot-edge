@@ -161,6 +161,7 @@ def _enrich_table(
     left_mount: np.ndarray | None,
     right_mount: np.ndarray | None,
     include_action: bool,
+    include_joint_repr: bool = True,
 ) -> pa.Table:
     """Add all new columns to a pyarrow Table and return the augmented table."""
     n = len(tbl)
@@ -176,8 +177,8 @@ def _enrich_table(
     act_ee_L = np.zeros((n, 8), np.float32) if include_action else None
     act_ee_R = np.zeros((n, 8), np.float32) if include_action else None
 
-    act_delta    = np.zeros((n, _ACT_DIM), np.float32)
-    act_rel      = np.zeros((n, _ACT_DIM), np.float32)
+    act_delta    = np.zeros((n, _ACT_DIM), np.float32) if include_joint_repr else None
+    act_rel      = np.zeros((n, _ACT_DIM), np.float32) if include_joint_repr else None
     ee_L_delta   = np.zeros((n, 8), np.float32) if include_action else None
     ee_R_delta   = np.zeros((n, 8), np.float32) if include_action else None
     ee_L_rel     = np.zeros((n, 8), np.float32) if include_action else None
@@ -210,18 +211,18 @@ def _enrich_table(
             # ── joint action delta ─────────────────────────────────────────
             # t=0: delta vs state joint positions (no prior action exists)
             # t>0: delta vs previous action
-            if frame_in_ep == 0:
-                ref = np.zeros(_ACT_DIM, np.float64)
-                ref[:_ACT_JOINT_DIM] = state[:_ACT_JOINT_DIM]
-            else:
-                ref = prev_action
-            act_delta[row_i] = (action - ref).astype(np.float32)
+            if include_joint_repr:
+                if frame_in_ep == 0:
+                    ref = np.zeros(_ACT_DIM, np.float64)
+                    ref[:_ACT_JOINT_DIM] = state[:_ACT_JOINT_DIM]
+                else:
+                    ref = prev_action
+                act_delta[row_i] = (action - ref).astype(np.float32)
 
-            # ── joint action relative ──────────────────────────────────────
-            # action[t] - state[t] for joint dims; velocity dims kept as-is
-            rel_ref = np.zeros(_ACT_DIM, np.float64)
-            rel_ref[:_ACT_JOINT_DIM] = state[:_ACT_JOINT_DIM]
-            act_rel[row_i] = (action - rel_ref).astype(np.float32)
+                # action[t] - state[t] for joint dims; velocity dims kept as-is
+                rel_ref = np.zeros(_ACT_DIM, np.float64)
+                rel_ref[:_ACT_JOINT_DIM] = state[:_ACT_JOINT_DIM]
+                act_rel[row_i] = (action - rel_ref).astype(np.float32)
 
             # ── EE action delta / relative ─────────────────────────────────
             if include_action:
@@ -252,9 +253,10 @@ def _enrich_table(
     new_cols = {
         "observation.ee_left":  _col(obs_ee_L),
         "observation.ee_right": _col(obs_ee_R),
-        "action.delta":         _col(act_delta),
-        "action.relative":      _col(act_rel),
     }
+    if include_joint_repr:
+        new_cols["action.delta"]    = _col(act_delta)
+        new_cols["action.relative"] = _col(act_rel)
     if include_action:
         new_cols["action.ee_left"]           = _col(act_ee_L)
         new_cols["action.ee_right"]          = _col(act_ee_R)
@@ -289,24 +291,27 @@ def _feature_repr(dim: int, description: str) -> dict:
     return {"dtype": "float32", "shape": [dim], "names": None, "description": description}
 
 
-def _update_info_json(info_path: Path, include_action: bool, ref_frame: str) -> None:
+def _update_info_json(
+    info_path: Path, include_action: bool, include_joint_repr: bool, ref_frame: str
+) -> None:
     info  = json.loads(info_path.read_text())
     feats = info.setdefault("features", {})
     fl    = "robot_base" if ref_frame == "robot_base" else "arm_base"
 
     feats["observation.ee_left"]  = _feature_ee("left",  fl)
     feats["observation.ee_right"] = _feature_ee("right", fl)
-    feats["action.delta"] = _feature_repr(
-        _ACT_DIM,
-        "Sequential delta of joint-space action: action[t]-action[t-1]. "
-        "First frame uses state joints as reference. "
-        "Dims 0..13=arm joints; 14..15=linear/angular velocity.",
-    )
-    feats["action.relative"] = _feature_repr(
-        _ACT_DIM,
-        "Relative joint-space action: action[t]-state[t] for joint dims (0..13). "
-        "Velocity dims (14..15) kept as-is. Centered around zero for stable training.",
-    )
+    if include_joint_repr:
+        feats["action.delta"] = _feature_repr(
+            _ACT_DIM,
+            "Sequential delta of joint-space action: action[t]-action[t-1]. "
+            "First frame uses state joints as reference. "
+            "Dims 0..13=arm joints; 14..15=linear/angular velocity.",
+        )
+        feats["action.relative"] = _feature_repr(
+            _ACT_DIM,
+            "Relative joint-space action: action[t]-state[t] for joint dims (0..13). "
+            "Velocity dims (14..15) kept as-is. Centered around zero for stable training.",
+        )
     if include_action:
         feats["action.ee_left"]           = _feature_ee("left",  fl)
         feats["action.ee_right"]          = _feature_ee("right", fl)
@@ -329,15 +334,20 @@ def process_dataset(
     output_root: Path,
     ref_frame: str,
     include_action: bool,
+    include_joint_repr: bool = True,
 ) -> None:
     in_place = output_root.resolve() == dataset_root.resolve()
 
     # Guard against double-enrichment
     info_path = dataset_root / "meta" / "info.json"
     if info_path.exists():
-        existing = set(json.loads(info_path.read_text()).get("features", {}).keys())
-        collision = {"observation.ee_left", "observation.ee_right",
-                     "action.delta", "action.relative"} & existing
+        existing  = set(json.loads(info_path.read_text()).get("features", {}).keys())
+        guard     = {"observation.ee_left", "observation.ee_right"}
+        if include_joint_repr:
+            guard |= {"action.delta", "action.relative"}
+        if include_action:
+            guard |= {"action.ee_left", "action.ee_right"}
+        collision = guard & existing
         if collision:
             raise ValueError(
                 f"Features already exist: {sorted(collision)}.\n"
@@ -350,7 +360,8 @@ def process_dataset(
     if include_action:
         console.print(f"    act  left  → action[dim]{_ACT_LEFT_JOINTS}[/]")
         console.print(f"    act  right → action[dim]{_ACT_RIGHT_JOINTS}[/]")
-    console.print(f"  ref frame    : [bold]{ref_frame}[/]")
+    console.print(f"  ref frame         : [bold]{ref_frame}[/]")
+    console.print(f"  include joint repr: [bold]{include_joint_repr}[/]")
     console.print(f"  include action EE : [bold]{include_action}[/]")
 
     left_mount  = _LEFT_MOUNT_XYZ  if ref_frame == "robot_base" else None
@@ -377,10 +388,10 @@ def process_dataset(
     for pq_src in track(pq_files, description=f"  Enriching {len(pq_files)} parquet file(s)…"):
         pq_dst = work_root / pq_src.relative_to(dataset_root)
         tbl = pq.read_table(pq_src)
-        tbl = _enrich_table(tbl, kin, left_mount, right_mount, include_action)
+        tbl = _enrich_table(tbl, kin, left_mount, right_mount, include_action, include_joint_repr)
         pq.write_table(tbl, pq_dst)
 
-    _update_info_json(work_root / "meta" / "info.json", include_action, ref_frame)
+    _update_info_json(work_root / "meta" / "info.json", include_action, include_joint_repr, ref_frame)
 
     if in_place:
         shutil.rmtree(dataset_root)
@@ -413,6 +424,11 @@ def _parse_args() -> argparse.Namespace:
                        "Also compute EE poses and delta/relative representations "
                        "for action joints (action.ee_left/right and their delta/relative)."
                    ))
+    p.add_argument("--no-joint-repr", action="store_true",
+                   help=(
+                       "Skip computing joint-space action representations "
+                       "(action.delta and action.relative)."
+                   ))
     return p.parse_args()
 
 
@@ -426,4 +442,5 @@ if __name__ == "__main__":
         output_root=output_root,
         ref_frame=args.frame,
         include_action=args.include_action,
+        include_joint_repr=not args.no_joint_repr,
     )

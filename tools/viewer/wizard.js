@@ -52,7 +52,9 @@ async function loadConfig() {
 
         const jee  = cfg.joint_to_ee || {};
         if (jee.ee_frame) set('ee-frame', jee.ee_frame);
-        document.getElementById('ee-include-action').checked = !!jee.include_action;
+        document.getElementById('ee-include-joint-repr').checked =
+            jee.include_joint_repr !== false;  // default true when absent
+        document.getElementById('ee-include-action').checked = jee.include_action !== false;
 
         const sftp = cfg.sftp || {};
         if (sftp.hostname)    set('sftp-hostname', sftp.hostname);
@@ -82,8 +84,9 @@ function buildConfig() {
         stop_at:     get('stop-at'),
         datasets,
         joint_to_ee: {
-            ee_frame:       get('ee-frame'),
-            include_action: document.getElementById('ee-include-action').checked,
+            ee_frame:           get('ee-frame'),
+            include_joint_repr: document.getElementById('ee-include-joint-repr').checked,
+            include_action:     document.getElementById('ee-include-action').checked,
         },
     };
 
@@ -198,7 +201,8 @@ async function runPipeline() {
             start_from:        cfg.start_from,
             stop_at:           cfg.stop_at,
             ee_frame:          cfg.joint_to_ee?.ee_frame,
-            ee_include_action: !!cfg.joint_to_ee?.include_action,
+            ee_joint_repr:     cfg.joint_to_ee?.include_joint_repr !== false,
+            ee_include_action: cfg.joint_to_ee?.include_action !== false,
         });
     } catch (e) {
         showStatus('Failed to start pipeline: ' + e.message, 'err');

@@ -34,8 +34,7 @@ VIEWER_DIR    = TOOLS_DIR / "viewer"
 CONFIG_PATH   = TOOLS_DIR / "config.yaml"
 WIZARD_SCRIPT = TOOLS_DIR / "dataset-wizard.py"
 
-TROSSEN_DIR = Path("/home/edgeai/trossen_arm_ros/trossen_arm_description")
-URDF_PATH   = TROSSEN_DIR / "urdf/generated/mobile_ai.urdf"
+URDF_PATH   = TOOLS_DIR / "assets" / "mobile_ai.urdf"
 
 mimetypes.add_type("application/javascript", ".js")
 mimetypes.add_type("text/css",               ".css")
@@ -305,10 +304,12 @@ class Handler(BaseHTTPRequestHandler):
 
             elif p == "/api/wizard/run":
                 cmd = [sys.executable, str(WIZARD_SCRIPT), "--config", str(CONFIG_PATH)]
-                if data.get("start_from"):    cmd += ["--start-from", data["start_from"]]
-                if data.get("stop_at"):       cmd += ["--stop-at",    data["stop_at"]]
-                if data.get("ee_frame"):      cmd += ["--ee-frame",   data["ee_frame"]]
+                if data.get("start_from"):        cmd += ["--start-from", data["start_from"]]
+                if data.get("stop_at"):           cmd += ["--stop-at",    data["stop_at"]]
+                if data.get("ee_frame"):          cmd += ["--ee-frame",   data["ee_frame"]]
                 if data.get("ee_include_action"): cmd += ["--ee-include-action"]
+                if data.get("ee_joint_repr") is False:
+                    cmd += ["--no-ee-joint-repr"]
 
                 job_id = uuid.uuid4().hex[:8]
                 with _jobs_lock:

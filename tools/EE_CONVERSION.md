@@ -221,6 +221,74 @@ Each gripper pose is expressed in its own arm-local frame."]
 
 ---
 
+## Action Representations
+
+In addition to EE poses, the script computes **action representation columns** that express the action signal in forms better suited for policy training. These align with the representations described in the [LeRobot action representations guide](https://huggingface.co/docs/lerobot/action_representations).
+
+### Overview
+
+| Column | Shape | Formula | Written when |
+|---|---|---|---|
+| `action.delta` | `[16]` | `action[t] − action[t−1]` (t=0: vs state joints) | Always |
+| `action.relative` | `[16]` | `action[t] − state[t]` for joint dims 0–13; velocity dims 14–15 kept as-is | Always |
+| `action.ee_left.delta` | `[8]` | `action_ee_left[t] − action_ee_left[t−1]` (t=0: vs obs EE) | `--include-action` |
+| `action.ee_right.delta` | `[8]` | `action_ee_right[t] − action_ee_right[t−1]` (t=0: vs obs EE) | `--include-action` |
+| `action.ee_left.relative` | `[8]` | `action_ee_left[t] − observation.ee_left[t]` | `--include-action` |
+| `action.ee_right.relative` | `[8]` | `action_ee_right[t] − observation.ee_right[t]` | `--include-action` |
+
+All representations are float32 and share the same dimension as their source column.
+
+---
+
+### Relative vs Delta — which to use?
+
+LeRobot's documentation (and pi0/pi0.5 practice) draws a clear distinction:
+
+| Property | `action.relative` / `action.ee_*.relative` | `action.delta` / `action.ee_*.delta` |
+|---|---|---|
+| Reference point | Current **state** (or obs EE) at every timestep | **Previous action** (sequential) |
+| Error accumulation | None — each value is independently anchored to the current observation | Compounds — recovering the absolute target requires summing all prior deltas |
+| Centering | Centered around zero (small offsets dominate) → stable normalization | Centered around zero only for slow motion |
+| UMI / pi0 recommendation | **Preferred** | Explicitly discouraged by UMI |
+
+**Use `action.relative`** (or `action.ee_*.relative`) when training or fine-tuning policies that follow the pi0 / LeRobot convention. Use `action.delta` only if your downstream framework explicitly requires sequential differences.
+
+---
+
+### Quaternion note
+
+Position deltas and relatives are Euclidean differences and geometrically exact. **Orientation** deltas and relatives are computed by naive vector subtraction over the quaternion components `[qw, qx, qy, qz]`. This is a valid linear approximation for small rotations but is not geometrically proper (the result is not a unit quaternion). For large orientation changes consider computing orientation differences as rotation-matrix products or log-map vectors instead.
+
+---
+
+### Controlling which representations are computed
+
+By default both joint-space and EE representations are computed. Use the wizard UI or CLI flags to opt out of either:
+
+```bash
+# Skip joint-space delta/relative (action.delta, action.relative)
+python joint-to-ee.py --dataset /path/to/dataset --no-joint-repr
+
+# Skip EE action + its delta/relative (action.ee_left/right.*)
+# (just omit --include-action, which is already the default)
+python joint-to-ee.py --dataset /path/to/dataset  # no --include-action
+
+# Full output (all representations + EE action)
+python joint-to-ee.py --dataset /path/to/dataset --include-action
+```
+
+In `dataset-wizard.py` / the web wizard:
+
+```yaml
+# config.yaml
+joint_to_ee:
+  ee_frame: robot_base
+  include_joint_repr: true   # action.delta + action.relative
+  include_action: true       # action.ee_left/right + their delta/relative
+```
+
+---
+
 ## Running the Conversion
 
 ### Via `dataset-wizard.py` (recommended)
