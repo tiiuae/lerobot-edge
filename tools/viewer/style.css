@@ -132,11 +132,18 @@ select:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
   width: 10px; height: 10px;
   border-radius: 50%;
 }
+.dot.obs-l  { background: #2266cc; }
+.dot.obs-r  { background: #cc2211; }
+.dot.sec-l  { background: #00bbdd; }
+.dot.sec-r  { background: #dd7700; }
+.dot.err    { background: #ffdd00; }
+.dot.delta  { background: #22cc55; }
+.dot.rel    { background: #aa44ff; }
+/* legacy names kept for any existing HTML references */
 .dot.left     { background: #2266cc; }
 .dot.right    { background: #cc2211; }
 .dot.fk-left  { background: #00bbdd; }
 .dot.fk-right { background: #dd7700; }
-.dot.err      { background: #ffdd00; }
 
 .gutter {
   width: 3px;
@@ -183,6 +190,57 @@ footer label {
   gap: 6px;
   align-items: center;
   color: var(--muted);
+  white-space: nowrap;
+}
+
+/* ── Mode button groups ──────────────────────────────────────────────── */
+.mode-group {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border);
+  padding-left: 10px;
+}
+
+.mode-label {
+  color: var(--muted);
+  font-size: 10px;
+  white-space: nowrap;
+  margin-right: 2px;
+}
+
+.left-mode-btn, .right-mode-btn {
+  background: var(--bg);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 2px 7px;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color .12s, border-color .12s, background .12s;
+}
+.left-mode-btn:hover, .right-mode-btn:hover {
+  color: var(--text);
+  border-color: var(--muted);
+}
+.left-mode-btn.active, .right-mode-btn.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.left-mode-btn.unavailable, .right-mode-btn.unavailable {
+  opacity: 0.30;
+  cursor: not-allowed;
+}
+
+/* ── Footer mode info ────────────────────────────────────────────────── */
+.mode-info {
+  color: var(--muted);
+  font-size: 11px;
+  margin-left: auto;
   white-space: nowrap;
 }
 

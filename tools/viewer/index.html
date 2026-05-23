@@ -34,6 +34,18 @@
       </label>
       <span id="statusMsg" class="status"></span>
     </div>
+    <div class="mode-group">
+      <span class="mode-label">Robot:</span>
+      <button class="left-mode-btn active" data-mode="state">State</button>
+      <button class="left-mode-btn"        data-mode="action">Action</button>
+    </div>
+    <div class="mode-group">
+      <span class="mode-label">EE:</span>
+      <button class="right-mode-btn active" data-mode="fk">FK Val</button>
+      <button class="right-mode-btn"        data-mode="obs_action">Obs/Act</button>
+      <button class="right-mode-btn"        data-mode="ee_delta">EE &#916;</button>
+      <button class="right-mode-btn"        data-mode="ee_relative">EE Rel</button>
+    </div>
     <button id="calibBtn" title="Joint calibration">⚙</button>
     <button id="helpBtn"  title="Help">?</button>
   </header>
@@ -61,39 +73,62 @@
       <h2>Robot Dataset Viewer — Help</h2>
 
       <section>
-        <h3>Panels</h3>
+        <h3>Left panel — Robot mode buttons</h3>
         <dl>
-          <dt>Joint Space <em>(left)</em></dt>
-          <dd>URDF robot driven frame-by-frame from <code>observation.state</code>.
-              Small blue/red dots show the dataset's recorded EE position as a
-              reference overlay on the gripper.</dd>
-          <dt>FK vs Dataset EE <em>(right)</em></dt>
-          <dd>No robot body — pure EE comparison for forward-kinematics verification.
-              <strong>Blue/red</strong> spheres = <code>observation.ee_left/right</code>
-              (what the dataset recorded).
-              <strong>Cyan/orange</strong> spheres = EE position read from the URDF
-              after applying state joints (what the kinematic model gives).
-              <strong>Yellow lines</strong> = the error between the two — invisible
-              when FK is correct, visually prominent when there is a discrepancy.</dd>
+          <dt>State</dt>
+          <dd>URDF robot driven from <code>observation.state</code> — what the robot <em>was</em> at each frame.</dd>
+          <dt>Action</dt>
+          <dd>URDF robot driven from <code>action</code> — what the policy <em>commanded</em> at each frame.
+              Useful to spot tracking errors when state and action diverge.</dd>
+        </dl>
+      </section>
+
+      <section>
+        <h3>Right panel — EE mode buttons</h3>
+        <dl>
+          <dt>FK Val</dt>
+          <dd>Forward-kinematics validation.
+              <strong>Blue/red</strong> = <code>observation.ee_left/right</code> (dataset-recorded EE).
+              <strong>Cyan/orange</strong> = EE re-computed from URDF after applying state joints.
+              <strong>Yellow line</strong> = FK error — invisible when correct.</dd>
+          <dt>Obs/Act</dt>
+          <dd>Observation EE vs Action EE.
+              <strong>Blue/red</strong> = <code>observation.ee_left/right</code>.
+              <strong>Cyan/orange</strong> = <code>action.ee_left/right</code>.
+              <strong>Yellow line</strong> = tracking gap.
+              Requires <code>joint_to_ee.py --include-action</code>.</dd>
+          <dt>EE &#916;</dt>
+          <dd>Sequential delta of the action EE.
+              <strong>Blue/red</strong> = observation EE position.
+              <strong>Green arrows</strong> = direction of <code>action.ee_*.delta</code> (EE[t] − EE[t−1]).
+              Arrow length is proportional to delta magnitude (scaled ×8). Footer shows mm gap.</dd>
+          <dt>EE Rel</dt>
+          <dd>Relative action EE (action EE relative to current observation EE).
+              <strong>Blue/red</strong> = observation EE position.
+              <strong>Purple arrows</strong> = direction of <code>action.ee_*.relative</code> (action EE − obs EE).
+              Requires <code>joint_to_ee.py --include-action</code>.</dd>
         </dl>
       </section>
 
       <section>
         <h3>Coloured elements</h3>
         <dl>
-          <dt><span class="swatch" style="background:#2266cc"></span> Blue sphere &amp; line — left arm, dataset EE</dt>
-          <dd><code>observation.ee_left</code> — position recorded in the dataset.</dd>
-          <dt><span class="swatch" style="background:#cc2211"></span> Red sphere &amp; line — right arm, dataset EE</dt>
-          <dd><code>observation.ee_right</code> — position recorded in the dataset.</dd>
-          <dt><span class="swatch" style="background:#00bbdd"></span> Cyan sphere &amp; line — left arm, FK EE</dt>
-          <dd>EE position computed from the URDF after applying <code>observation.state</code> joints.</dd>
-          <dt><span class="swatch" style="background:#dd7700"></span> Orange sphere &amp; line — right arm, FK EE</dt>
-          <dd>EE position computed from the URDF after applying <code>observation.state</code> joints.</dd>
+          <dt><span class="swatch" style="background:#2266cc"></span> Blue — left arm observation EE</dt>
+          <dd><code>observation.ee_left</code> — absolute EE position recorded in the dataset.</dd>
+          <dt><span class="swatch" style="background:#cc2211"></span> Red — right arm observation EE</dt>
+          <dd><code>observation.ee_right</code> — absolute EE position recorded in the dataset.</dd>
+          <dt><span class="swatch" style="background:#00bbdd"></span> Cyan — left arm secondary EE</dt>
+          <dd>FK EE (FK Val mode) or <code>action.ee_left</code> (Obs/Act mode).</dd>
+          <dt><span class="swatch" style="background:#dd7700"></span> Orange — right arm secondary EE</dt>
+          <dd>FK EE (FK Val mode) or <code>action.ee_right</code> (Obs/Act mode).</dd>
           <dt><span class="swatch" style="background:#ffdd00"></span> Yellow line</dt>
-          <dd><strong>FK error</strong>: connects dataset EE to URDF FK EE.
-              Zero length = correct FK. Non-zero = mismatch in the dataset.</dd>
+          <dd>Error/gap between primary and secondary EE markers.</dd>
+          <dt><span class="swatch" style="background:#22cc55"></span> Green arrow</dt>
+          <dd><code>action.ee_*.delta</code> — sequential EE delta direction and magnitude.</dd>
+          <dt><span class="swatch" style="background:#aa44ff"></span> Purple arrow</dt>
+          <dd><code>action.ee_*.relative</code> — action EE minus observation EE vector.</dd>
           <dt><span class="swatch" style="background:#445566"></span> Grey spheres</dt>
-          <dd>Reference markers for the arm mount points on the mobile base (fixed).</dd>
+          <dd>Arm mount reference points on the mobile base (fixed positions).</dd>
           <dt><span class="swatch axis-x"></span><span class="swatch axis-y"></span><span class="swatch axis-z"></span> Axis arrows</dt>
           <dd>End-effector orientation frame from <code>observation.ee_*</code>.</dd>
         </dl>
@@ -144,20 +179,14 @@
 
   <main class="split">
     <div class="panel" id="jointPanel">
-      <div class="panel-title">Joint Space <span class="panel-subtitle">· observation.state</span></div>
+      <div class="panel-title">Joint Space <span class="panel-subtitle">· Robot / Action buttons</span></div>
       <canvas id="jointCanvas"></canvas>
     </div>
     <div class="gutter"></div>
     <div class="panel" id="eePanel">
-      <div class="panel-title">FK vs Dataset EE <span class="panel-subtitle">· error = yellow line</span></div>
+      <div class="panel-title">EE Analysis <span class="panel-subtitle">· EE buttons</span></div>
       <canvas id="eeCanvas"></canvas>
-      <div class="legend">
-        <span class="dot left"></span>Dataset EE L
-        <span class="dot right"></span>Dataset EE R
-        <span class="dot fk-left"></span>FK EE L
-        <span class="dot fk-right"></span>FK EE R
-        <span class="dot err"></span>Error
-      </div>
+      <div class="legend" id="eeLegend"></div>
     </div>
   </main>
 
@@ -173,6 +202,7 @@
         <option value="2">2×</option>
       </select>
     </label>
+    <span id="modeInfo" class="mode-info"></span>
   </footer>
 
   <script type="module" src="main.js"></script>

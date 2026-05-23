@@ -41,14 +41,19 @@ def find_datasets(cache_dir: Path):
             except ValueError:
                 name = root.name
             results.append({
-                "name":           name,
-                "path":           str(root),
-                "total_episodes": info.get("total_episodes", 0),
-                "total_frames":   info.get("total_frames",   0),
-                "has_ee_left":    "observation.ee_left"  in feats,
-                "has_ee_right":   "observation.ee_right" in feats,
-                "state_names":    feats.get("observation.state", {}).get("names", []),
-                "action_names":   feats.get("action",            {}).get("names", []),
+                "name":              name,
+                "path":              str(root),
+                "total_episodes":    info.get("total_episodes", 0),
+                "total_frames":      info.get("total_frames",   0),
+                "has_ee_left":       "observation.ee_left"         in feats,
+                "has_ee_right":      "observation.ee_right"        in feats,
+                "has_action_ee":     "action.ee_left"              in feats,
+                "has_ee_delta":      "action.ee_left.delta"        in feats,
+                "has_ee_relative":   "action.ee_left.relative"     in feats,
+                "has_joint_delta":   "action.delta"                in feats,
+                "has_joint_relative":"action.relative"             in feats,
+                "state_names":       feats.get("observation.state", {}).get("names", []),
+                "action_names":      feats.get("action",            {}).get("names", []),
             })
         except Exception as e:
             print(f"  [skip] {info_path}: {e}")
@@ -72,7 +77,11 @@ def get_frames(dataset_path: str, episode_idx: int):
     root = Path(dataset_path)
     WANT = [
         "observation.state", "action", "timestamp", "frame_index",
-        "observation.ee_left", "observation.ee_right",
+        "observation.ee_left",        "observation.ee_right",
+        "action.ee_left",             "action.ee_right",
+        "action.ee_left.delta",       "action.ee_right.delta",
+        "action.ee_left.relative",    "action.ee_right.relative",
+        "action.delta",               "action.relative",
     ]
     chunks = []
     for pq_file in sorted((root / "data").rglob("*.parquet")):
@@ -172,7 +181,7 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     ap = argparse.ArgumentParser(description="Robot Dataset Viewer Server")
     ap.add_argument("--port",  type=int,  default=8080)
-    ap.add_argument("--cache", type=str,  default=str(Path.home() / ".cache/huggingface/lerobot"),
+    ap.add_argument("--cache", type=str,  default=str(Path.home() / "/home/edgeai/lerobot/cache"),
                     help="Path to LeRobot dataset cache (absolute or relative to CWD)")
     args = ap.parse_args()
 
