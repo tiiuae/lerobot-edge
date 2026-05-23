@@ -1,0 +1,52 @@
+# Dataset Wizard Configuration — Example
+# Copy this file to config.yaml and fill in your values.
+# WARNING: config.yaml may contain SFTP credentials. Do NOT commit it.
+
+# ── Pipeline control ──────────────────────────────────────────────────────────
+# Options: conversion | merge | ee_conversion | upload
+start_from: conversion
+stop_at: upload
+
+# ── Dataset location ──────────────────────────────────────────────────────────
+base_path: ~/.cache/huggingface/lerobot/your-username
+
+# ── Output dataset name ───────────────────────────────────────────────────────
+merged_name: my-merged-dataset
+
+# ── Datasets to merge ─────────────────────────────────────────────────────────
+datasets:
+  - my-dataset-1
+  - my-dataset-2
+  - my-dataset-3
+
+# ── EE conversion + action representations (Stage 3) ─────────────────────────
+# Omit ee_frame (or leave blank) to skip this stage entirely.
+#
+# ee_frame options:
+#   robot_base  — EE poses in robot base_link frame (both arms share one frame)
+#   arm         — EE poses in each arm's own base_link frame
+#
+# include_action: also compute action.ee_left/right and their delta/relative.
+#
+# New columns added to every parquet file:
+#   observation.ee_left        [7]  [x,y,z,qw,qx,qy,qz] absolute EE from state
+#   observation.ee_right       [7]  absolute EE from state
+#   action.delta               [16] sequential joint delta (action[t]-action[t-1])
+#   action.relative            [16] joint action relative to current state
+#   action.ee_left             [7]  absolute EE from action (include_action only)
+#   action.ee_right            [7]  absolute EE from action (include_action only)
+#   action.ee_left.delta       [7]  sequential EE delta    (include_action only)
+#   action.ee_right.delta      [7]  sequential EE delta    (include_action only)
+#   action.ee_left.relative    [7]  action EE - obs EE     (include_action only)
+#   action.ee_right.relative   [7]  action EE - obs EE     (include_action only)
+joint_to_ee:
+  ee_frame: robot_base    # or: arm
+  include_action: false   # set true to also enrich action joints
+
+# ── SFTP upload configuration ─────────────────────────────────────────────────
+sftp:
+  hostname: xxx.xxx.xxx.xxx
+  port: 22
+  username: your_username
+  password: your_password
+  remote_path: /path/to/remote/directory

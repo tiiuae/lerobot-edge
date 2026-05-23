@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Robot Dataset Viewer</title>
+  <link rel="stylesheet" href="style.css">
+  <!--
+    urdf-loader is served from /lib/ (same origin) so the importmap applies.
+    Its source uses 'three/examples/jsm/' — both that and 'three/addons/' are
+    mapped to the same jsDelivr directory so all Three.js imports share one instance.
+  -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three":               "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+      "three/addons/":       "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/",
+      "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/",
+      "urdf-loader":         "/lib/URDFLoader.js"
+    }
+  }
+  </script>
+</head>
+<body>
+
+  <header>
+    <span class="logo">Robot Dataset Viewer</span>
+    <div class="header-controls">
+      <label>Dataset
+        <select id="datasetSelect"><option>Loading…</option></select>
+      </label>
+      <label>Episode
+        <select id="episodeSelect"></select>
+      </label>
+      <span id="statusMsg" class="status"></span>
+    </div>
+    <button id="calibBtn" title="Joint calibration">⚙</button>
+    <button id="helpBtn"  title="Help">?</button>
+  </header>
+
+  <!-- ── Joint calibration panel ─────────────────────────────────────── -->
+  <div id="calibPanel" class="calib-panel hidden" role="dialog" aria-label="Joint calibration">
+    <div class="calib-header">
+      <span>Joint Calibration</span>
+      <button id="calibClose" aria-label="Close">✕</button>
+    </div>
+    <div class="calib-help">
+      Applied: <code>urdf = sign × value + offset</code> (rad).<br>
+      Adjust until visualization matches the physical robot. Settings persist locally.
+    </div>
+    <div id="calibRows"></div>
+    <div class="calib-actions">
+      <button id="calibReset" title="Reset all joints to sign=+1, offset=0">Reset all</button>
+    </div>
+  </div>
+
+  <!-- ── Help modal ──────────────────────────────────────────────────── -->
+  <div id="helpOverlay" class="help-overlay hidden" role="dialog" aria-modal="true">
+    <div class="help-box">
+      <button class="help-close" id="helpClose" aria-label="Close help">✕</button>
+      <h2>Robot Dataset Viewer — Help</h2>
+
+      <section>
+        <h3>Panels</h3>
+        <dl>
+          <dt>Joint Space <em>(left)</em></dt>
+          <dd>URDF robot driven frame-by-frame from <code>observation.state</code>.
+              Small blue/red dots show the dataset's recorded EE position as a
+              reference overlay on the gripper.</dd>
+          <dt>FK vs Dataset EE <em>(right)</em></dt>
+          <dd>No robot body — pure EE comparison for forward-kinematics verification.
+              <strong>Blue/red</strong> spheres = <code>observation.ee_left/right</code>
+              (what the dataset recorded).
+              <strong>Cyan/orange</strong> spheres = EE position read from the URDF
+              after applying state joints (what the kinematic model gives).
+              <strong>Yellow lines</strong> = the error between the two — invisible
+              when FK is correct, visually prominent when there is a discrepancy.</dd>
+        </dl>
+      </section>
+
+      <section>
+        <h3>Coloured elements</h3>
+        <dl>
+          <dt><span class="swatch" style="background:#2266cc"></span> Blue sphere &amp; line — left arm, dataset EE</dt>
+          <dd><code>observation.ee_left</code> — position recorded in the dataset.</dd>
+          <dt><span class="swatch" style="background:#cc2211"></span> Red sphere &amp; line — right arm, dataset EE</dt>
+          <dd><code>observation.ee_right</code> — position recorded in the dataset.</dd>
+          <dt><span class="swatch" style="background:#00bbdd"></span> Cyan sphere &amp; line — left arm, FK EE</dt>
+          <dd>EE position computed from the URDF after applying <code>observation.state</code> joints.</dd>
+          <dt><span class="swatch" style="background:#dd7700"></span> Orange sphere &amp; line — right arm, FK EE</dt>
+          <dd>EE position computed from the URDF after applying <code>observation.state</code> joints.</dd>
+          <dt><span class="swatch" style="background:#ffdd00"></span> Yellow line</dt>
+          <dd><strong>FK error</strong>: connects dataset EE to URDF FK EE.
+              Zero length = correct FK. Non-zero = mismatch in the dataset.</dd>
+          <dt><span class="swatch" style="background:#445566"></span> Grey spheres</dt>
+          <dd>Reference markers for the arm mount points on the mobile base (fixed).</dd>
+          <dt><span class="swatch axis-x"></span><span class="swatch axis-y"></span><span class="swatch axis-z"></span> Axis arrows</dt>
+          <dd>End-effector orientation frame from <code>observation.ee_*</code>.</dd>
+        </dl>
+      </section>
+
+      <section>
+        <h3>Joint calibration <em>(gear button ⚙)</em></h3>
+        <p>Per-arm calibration:
+           <code>urdf = sign × value + offset</code> per joint, per side.
+           Use this when one arm's encoders are biased relative to URDF zero.</p>
+        <p><strong>Fast workflow</strong>: pause on a frame where you know the
+           arm is at its physical home pose, then click
+           <strong>"Snap current → zero"</strong> for that arm. The offsets are
+           auto-set so the URDF renders that frame as home, and motion is
+           preserved relative to it.</p>
+        <p>Sign toggle flips axis convention, offset slider shifts the
+           zero point. <strong>Reset</strong> per-arm restores identity.
+           Settings persist in <code>localStorage</code>.</p>
+      </section>
+
+      <section>
+        <h3>Camera controls</h3>
+        <dl>
+          <dt>Orbit</dt><dd>Left-drag (or single-finger touch)</dd>
+          <dt>Zoom</dt><dd>Scroll wheel or pinch</dd>
+          <dt>Pan</dt><dd>Right-drag or middle-drag (two-finger touch)</dd>
+        </dl>
+        <p>Interacting with <em>either</em> panel syncs the camera to the other automatically.</p>
+      </section>
+
+      <section>
+        <h3>Playback</h3>
+        <dl>
+          <dt>▶ / ⏸</dt><dd>Play or pause animation</dd>
+          <dt>Slider</dt><dd>Jump to any frame directly</dd>
+          <dt>Speed</dt><dd>0.25× · 0.5× · 1× · 2× of the recorded 50 fps</dd>
+        </dl>
+      </section>
+
+      <section>
+        <h3>Dataset &amp; Episode selectors</h3>
+        <p>All LeRobot datasets found in the cache directory are listed.
+           Datasets without EE columns still show the joint-space panel;
+           the EE overlays are hidden automatically.</p>
+      </section>
+    </div>
+  </div>
+
+  <main class="split">
+    <div class="panel" id="jointPanel">
+      <div class="panel-title">Joint Space <span class="panel-subtitle">· observation.state</span></div>
+      <canvas id="jointCanvas"></canvas>
+    </div>
+    <div class="gutter"></div>
+    <div class="panel" id="eePanel">
+      <div class="panel-title">FK vs Dataset EE <span class="panel-subtitle">· error = yellow line</span></div>
+      <canvas id="eeCanvas"></canvas>
+      <div class="legend">
+        <span class="dot left"></span>Dataset EE L
+        <span class="dot right"></span>Dataset EE R
+        <span class="dot fk-left"></span>FK EE L
+        <span class="dot fk-right"></span>FK EE R
+        <span class="dot err"></span>Error
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <button id="playBtn">&#9654; Play</button>
+    <input  id="frameSlider" type="range" min="0" max="0" value="0">
+    <span   id="frameCounter" class="counter">— / —</span>
+    <label>Speed
+      <select id="speedSelect">
+        <option value="0.25">0.25×</option>
+        <option value="0.5">0.5×</option>
+        <option value="1" selected>1×</option>
+        <option value="2">2×</option>
+      </select>
+    </label>
+  </footer>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>

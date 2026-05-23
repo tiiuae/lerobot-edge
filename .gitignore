@@ -177,3 +177,8 @@ outputs/
 *.urdf
 *.xml
 *.part
+
+cache/
+# Dataset wizard — local config (may contain SFTP credentials)
+tools/config.yaml
+config.yaml
