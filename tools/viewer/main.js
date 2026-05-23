@@ -37,6 +37,23 @@ let hasActionEE  = false;   // action.ee_left/right columns present
 let hasEEDelta   = false;   // action.ee_left.delta columns present
 let hasEERel     = false;   // action.ee_left.relative columns present
 
+// ── Coordinate-frame correction ───────────────────────────────────────────────
+// The URDF root is base_footprint. URDF-loader places it at scene origin, so
+// matrixWorld (FK) positions are in base_footprint frame.  The dataset stores
+// EE positions in base_link frame (canonical ROS frame).  We read base_link's
+// world position after the robot loads and apply it as an additive offset to
+// all dataset-derived positions so both frames agree.
+const baseLinkOffset = new THREE.Vector3(0, 0, 0);
+
+// Convert a dataset [x,y,z,...] array from base_link frame to scene world frame.
+function worldPos(arr) {
+  return new THREE.Vector3(
+    arr[0] + baseLinkOffset.x,
+    arr[1] + baseLinkOffset.y,
+    arr[2] + baseLinkOffset.z,
+  );
+}
+
 // ── Joint name mapping: dataset state name → URDF joint name ──────────────────
 const JOINT_MAP = {
   left_joint_0:  'follower_left_joint_0',
@@ -203,10 +220,10 @@ function setLinePoints(line, a, b) {
   line.geometry.attributes.position.needsUpdate = true;
 }
 
-// pose7 = [x, y, z, qw, qx, qy, qz]
+// pose7 = [x, y, z, qw, qx, qy, qz] in base_link frame → placed in scene world frame.
 function applyPose(obj, pose7) {
   const [x, y, z, qw, qx, qy, qz] = pose7;
-  obj.position.set(x, y, z);
+  obj.position.set(x + baseLinkOffset.x, y + baseLinkOffset.y, z + baseLinkOffset.z);
   obj.quaternion.set(qx, qy, qz, qw);
 }
 
@@ -354,6 +371,12 @@ async function loadRobot() {
     }, null, reject);
   });
   jRosRoot.add(robot);
+
+  // Determine base_link offset so dataset positions (base_link frame) can be
+  // displayed in the scene world frame (base_footprint frame).
+  robot.updateMatrixWorld(true);
+  const blNode = robot.getObjectByName('base_link');
+  if (blNode) baseLinkOffset.setFromMatrixPosition(blNode.matrixWorld);
 }
 
 // ── Joint application ─────────────────────────────────────────────────────────
@@ -402,14 +425,12 @@ function buildObsTrajectories() {
   eeObsRightTrail= clearTrail(eeObsRightTrail,eRosRoot);
 
   if (hasEELeft) {
-    const pts = frames.map(f => f['observation.ee_left']).filter(Boolean)
-      .map(p => new THREE.Vector3(p[0], p[1], p[2]));
+    const pts = frames.map(f => f['observation.ee_left']).filter(Boolean).map(worldPos);
     eeObsLeftTrail = makeLine(pts, C_OBS_L, 0.6); eRosRoot.add(eeObsLeftTrail);
     jObsLeftTrail  = makeLine(pts, C_OBS_L, 0.6); jRosRoot.add(jObsLeftTrail);
   }
   if (hasEERight) {
-    const pts = frames.map(f => f['observation.ee_right']).filter(Boolean)
-      .map(p => new THREE.Vector3(p[0], p[1], p[2]));
+    const pts = frames.map(f => f['observation.ee_right']).filter(Boolean).map(worldPos);
     eeObsRightTrail = makeLine(pts, C_OBS_R, 0.6); eRosRoot.add(eeObsRightTrail);
     jObsRightTrail  = makeLine(pts, C_OBS_R, 0.6); jRosRoot.add(jObsRightTrail);
   }
@@ -447,8 +468,8 @@ function buildActionEETrajectories() {
   eeSecRightTrail = clearTrail(eeSecRightTrail, eRosRoot);
 
   if (!hasActionEE) return;
-  const ptsL = frames.map(f => f['action.ee_left'] ).filter(Boolean).map(p => new THREE.Vector3(p[0], p[1], p[2]));
-  const ptsR = frames.map(f => f['action.ee_right']).filter(Boolean).map(p => new THREE.Vector3(p[0], p[1], p[2]));
+  const ptsL = frames.map(f => f['action.ee_left'] ).filter(Boolean).map(worldPos);
+  const ptsR = frames.map(f => f['action.ee_right']).filter(Boolean).map(worldPos);
   if (ptsL.length) { eeSecLeftTrail  = makeLine(ptsL, C_SEC_L, 0.5); eRosRoot.add(eeSecLeftTrail); }
   if (ptsR.length) { eeSecRightTrail = makeLine(ptsR, C_SEC_R, 0.5); eRosRoot.add(eeSecRightTrail); }
 }
@@ -478,17 +499,17 @@ function updateEE(frame) {
   const obsR = frame['observation.ee_right'];
 
   // ── Left panel: small obs EE dots overlaid on URDF
-  if (obsL && hasEELeft) { jObsLeftMark.position.set(obsL[0], obsL[1], obsL[2]); jObsLeftMark.visible = true; }
-  if (obsR && hasEERight){ jObsRightMark.position.set(obsR[0], obsR[1], obsR[2]);jObsRightMark.visible = true; }
+  if (obsL && hasEELeft) { jObsLeftMark.position.copy(worldPos(obsL)); jObsLeftMark.visible = true; }
+  if (obsR && hasEERight){ jObsRightMark.position.copy(worldPos(obsR));jObsRightMark.visible = true; }
 
   // ── Right panel: observation EE (always shown)
   if (obsL && hasEELeft) {
-    applyPose(eeLeftFrame, obsL); eeLeftFrame.visible = true;
-    eeObsLeftMark.position.set(obsL[0], obsL[1], obsL[2]); eeObsLeftMark.visible = true;
+    applyPose(eeLeftFrame, obsL); eeLeftFrame.visible = true;          // applyPose applies offset
+    eeObsLeftMark.position.copy(worldPos(obsL)); eeObsLeftMark.visible = true;
   }
   if (obsR && hasEERight) {
     applyPose(eeRightFrame, obsR); eeRightFrame.visible = true;
-    eeObsRightMark.position.set(obsR[0], obsR[1], obsR[2]); eeObsRightMark.visible = true;
+    eeObsRightMark.position.copy(worldPos(obsR)); eeObsRightMark.visible = true;
   }
 
   hideAllSecondary();
@@ -500,16 +521,16 @@ function updateEE(frame) {
     const fkR = robot ? getEEWorldPos(robot, 'follower_right_ee_gripper_link') : null;
     if (fkL) { eeSecLeftMark.position.copy(fkL);  eeSecLeftMark.visible  = true; }
     if (fkR) { eeSecRightMark.position.copy(fkR); eeSecRightMark.visible = true; }
-    if (obsL && fkL && hasEELeft)  { setLinePoints(errLeftLine,  posV3(obsL), fkL); errLeftLine.visible  = true; }
-    if (obsR && fkR && hasEERight) { setLinePoints(errRightLine, posV3(obsR), fkR); errRightLine.visible = true; }
+    if (obsL && fkL && hasEELeft)  { setLinePoints(errLeftLine,  worldPos(obsL), fkL); errLeftLine.visible  = true; }
+    if (obsR && fkR && hasEERight) { setLinePoints(errRightLine, worldPos(obsR), fkR); errRightLine.visible = true; }
 
   } else if (rightMode === 'obs_action') {
     const actL = frame['action.ee_left'];
     const actR = frame['action.ee_right'];
-    if (actL && hasActionEE) { eeSecLeftMark.position.set(actL[0], actL[1], actL[2]);  eeSecLeftMark.visible  = true; }
-    if (actR && hasActionEE) { eeSecRightMark.position.set(actR[0], actR[1], actR[2]); eeSecRightMark.visible = true; }
-    if (obsL && actL && hasEELeft && hasActionEE)  { setLinePoints(errLeftLine,  posV3(obsL), new THREE.Vector3(actL[0], actL[1], actL[2])); errLeftLine.visible  = true; }
-    if (obsR && actR && hasEERight && hasActionEE) { setLinePoints(errRightLine, posV3(obsR), new THREE.Vector3(actR[0], actR[1], actR[2])); errRightLine.visible = true; }
+    if (actL && hasActionEE) { eeSecLeftMark.position.copy(worldPos(actL));  eeSecLeftMark.visible  = true; }
+    if (actR && hasActionEE) { eeSecRightMark.position.copy(worldPos(actR)); eeSecRightMark.visible = true; }
+    if (obsL && actL && hasEELeft && hasActionEE)  { setLinePoints(errLeftLine,  worldPos(obsL), worldPos(actL)); errLeftLine.visible  = true; }
+    if (obsR && actR && hasEERight && hasActionEE) { setLinePoints(errRightLine, worldPos(obsR), worldPos(actR)); errRightLine.visible = true; }
 
   } else if (rightMode === 'ee_delta') {
     const dL = frame['action.ee_left.delta'];
@@ -517,11 +538,11 @@ function updateEE(frame) {
     let magL = 0, magR = 0;
     if (dL && obsL && hasEEDelta) {
       arrowLeft.setColor(C_DELTA);
-      magL = updateArrow(arrowLeft,  posV3(obsL), dL[0], dL[1], dL[2]);
+      magL = updateArrow(arrowLeft,  worldPos(obsL), dL[0], dL[1], dL[2]);
     }
     if (dR && obsR && hasEEDelta) {
       arrowRight.setColor(C_DELTA);
-      magR = updateArrow(arrowRight, posV3(obsR), dR[0], dR[1], dR[2]);
+      magR = updateArrow(arrowRight, worldPos(obsR), dR[0], dR[1], dR[2]);
     }
     updateModeInfo(`Δ EE L: ${(magL*1000).toFixed(1)} mm  |  Δ EE R: ${(magR*1000).toFixed(1)} mm`);
 
@@ -531,11 +552,11 @@ function updateEE(frame) {
     let magL = 0, magR = 0;
     if (rL && obsL && hasEERel) {
       arrowLeft.setColor(C_REL);
-      magL = updateArrow(arrowLeft,  posV3(obsL), rL[0], rL[1], rL[2]);
+      magL = updateArrow(arrowLeft,  worldPos(obsL), rL[0], rL[1], rL[2]);
     }
     if (rR && obsR && hasEERel) {
       arrowRight.setColor(C_REL);
-      magR = updateArrow(arrowRight, posV3(obsR), rR[0], rR[1], rR[2]);
+      magR = updateArrow(arrowRight, worldPos(obsR), rR[0], rR[1], rR[2]);
     }
     updateModeInfo(`Gap L: ${(magL*1000).toFixed(1)} mm  |  Gap R: ${(magR*1000).toFixed(1)} mm`);
   }
