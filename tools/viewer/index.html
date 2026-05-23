@@ -46,9 +46,29 @@
       <button class="right-mode-btn"        data-mode="ee_delta">EE &#916;</button>
       <button class="right-mode-btn"        data-mode="ee_relative">EE Rel</button>
     </div>
+    <button id="dataBtn"  title="Inspect dataset values">Values</button>
+    <button id="graphBtn" title="Dataset graphs">Graphs</button>
     <button id="calibBtn" title="Joint calibration">⚙</button>
     <button id="helpBtn"  title="Help">?</button>
   </header>
+
+  <!-- ── Dataset values inspector panel ────────────────────────────── -->
+  <div id="dataPanel" class="data-panel hidden" role="dialog" aria-label="Dataset values">
+    <div class="data-panel-hdr">
+      <span>Dataset Values</span>
+      <button id="dataClose" aria-label="Close">✕</button>
+    </div>
+    <div id="dataPanelBody"></div>
+  </div>
+
+  <!-- ── Graphs panel ───────────────────────────────────────────────── -->
+  <div id="graphPanel" class="graph-panel hidden" role="dialog" aria-label="Data graphs">
+    <div class="graph-panel-hdr">
+      <span>Data Graphs</span>
+      <button id="graphClose" aria-label="Close">✕</button>
+    </div>
+    <div id="graphPanelBody"></div>
+  </div>
 
   <!-- ── Joint calibration panel ─────────────────────────────────────── -->
   <div id="calibPanel" class="calib-panel hidden" role="dialog" aria-label="Joint calibration">

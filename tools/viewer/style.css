@@ -256,7 +256,24 @@ footer label {
   flex-shrink: 0;
   transition: color .15s, border-color .15s;
 }
-#calibBtn { margin-left: auto; }
+#dataBtn, #graphBtn {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+  transition: color .15s, border-color .15s;
+}
+#dataBtn  { margin-left: auto; }
+#graphBtn { margin-left: 4px; }
+#dataBtn:hover,  #graphBtn:hover  { color: var(--text); border-color: var(--muted); }
+#dataBtn.active, #graphBtn.active { color: var(--accent); border-color: var(--accent); }
+#calibBtn { margin-left: 6px; }
 #helpBtn  { margin-left: 6px;  }
 #helpBtn:hover, #calibBtn:hover { color: var(--text); border-color: var(--muted); }
 
@@ -411,6 +428,159 @@ footer label {
   font-size: 11px;
 }
 .calib-actions button:hover { border-color: var(--muted); }
+
+/* ── Shared floating panel base ──────────────────────────────────────── */
+.data-panel, .graph-panel {
+  position: fixed;
+  z-index: 200;
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0,0,0,.5);
+}
+.data-panel.hidden, .graph-panel.hidden { display: none; }
+
+/* ── Dataset values inspector panel ─────────────────────────────────── */
+.data-panel {
+  top: 56px; left: 12px;
+  width: 220px;
+  padding: 8px 10px 8px;
+  font-size: 10px;
+}
+
+.data-panel-hdr {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 700;
+  font-size: 11px;
+  color: var(--accent);
+  margin-bottom: 6px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--border);
+  cursor: grab;
+  user-select: none;
+}
+.data-panel-hdr button {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+.data-panel-hdr button:hover { color: var(--text); }
+
+.data-section { margin-bottom: 10px; }
+
+.data-section-hdr {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  color: var(--muted);
+  text-transform: uppercase;
+  padding: 3px 0 3px;
+  border-bottom: 1px dashed var(--border);
+  margin-bottom: 3px;
+}
+
+.data-sub-hdr {
+  font-size: 9px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  padding: 4px 0 2px;
+  margin-top: 2px;
+}
+.data-sub-hdr.sub-left  { color: var(--blue); }
+.data-sub-hdr.sub-right { color: var(--red);  }
+.data-sub-hdr.sub-extra { color: var(--muted); }
+
+.data-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 1px 2px;
+  border-bottom: 1px solid rgba(33,38,45,.4);
+}
+.data-row:last-child { border-bottom: none; }
+
+.dk {
+  color: var(--muted);
+  flex-shrink: 0;
+  min-width: 36px;
+  font-size: 10px;
+}
+
+.dv {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  font-size: 10px;
+}
+
+/* ── Graphs panel ────────────────────────────────────────────────────── */
+.graph-panel {
+  top: 56px; right: 12px;
+  width: 380px;
+  padding: 8px 10px 10px;
+  font-size: 11px;
+}
+
+.graph-panel-hdr {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 700;
+  font-size: 11px;
+  color: var(--accent);
+  margin-bottom: 6px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--border);
+  cursor: grab;
+  user-select: none;
+}
+.graph-panel-hdr button {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+.graph-panel-hdr button:hover { color: var(--text); }
+
+.chart-group { margin-bottom: 10px; }
+
+.chart-title {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 3px;
+}
+
+.chart-canvas {
+  display: block;
+  width: 100%;
+  border-radius: 3px;
+  cursor: crosshair;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 3px;
+}
+
+.cleg {
+  font-size: 9px;
+  opacity: 0.85;
+  white-space: nowrap;
+}
 
 /* ── Help modal ──────────────────────────────────────────────────────── */
 .help-overlay {

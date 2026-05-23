@@ -37,6 +37,13 @@ let hasActionEE  = false;   // action.ee_left/right columns present
 let hasEEDelta   = false;   // action.ee_left.delta columns present
 let hasEERel     = false;   // action.ee_left.relative columns present
 
+// ── Dataset column names (from meta/info.json) ────────────────────────────────
+let stateNames  = [];
+let actionNames = [];
+
+// ── Data inspector: key → array of value <span> elements ─────────────────────
+let dataValMap = {};
+
 // ── Coordinate-frame correction ───────────────────────────────────────────────
 // The URDF root is base_footprint. URDF-loader places it at scene origin, so
 // matrixWorld (FK) positions are in base_footprint frame.  The dataset stores
@@ -663,6 +670,8 @@ async function onDatasetChange() {
   hasActionEE = info.has_action_ee  ?? false;
   hasEEDelta  = info.has_ee_delta   ?? false;
   hasEERel    = info.has_ee_relative?? false;
+  stateNames  = info.state_names    ?? [];
+  actionNames = info.action_names   ?? [];
 
   updateModeButtonAvailability();
 
@@ -692,6 +701,8 @@ async function loadEpisode(datasetPath, epIdx) {
 
   buildObsTrajectories();
   buildSecondaryTrajectories();
+  buildDataPanelSections();
+  buildGraphCharts();
   updateFrame(0);
   setStatus(`${frames.length} frames at 50 fps  ·  ${(frames.length / 50).toFixed(1)} s`);
 }
@@ -705,6 +716,8 @@ function updateFrame(idx) {
   if (!f) return;
   applyJoints(f);
   updateEE(f);
+  updateDataPanel(f);
+  renderAllCharts();
 }
 
 function startPlayback() {
@@ -909,6 +922,330 @@ function setupModeButtons() {
   updateModeLegend();
 }
 
+// ── Shared drag utility ───────────────────────────────────────────────────────
+function makeDraggable(panel, handle) {
+  handle.addEventListener('mousedown', e => {
+    if (e.target.tagName === 'BUTTON') return;
+    const r = panel.getBoundingClientRect();
+    panel.style.left   = r.left + 'px';
+    panel.style.top    = r.top  + 'px';
+    panel.style.right  = 'unset';
+    panel.style.bottom = 'unset';
+    let ox = r.left, oy = r.top, sx = e.clientX, sy = e.clientY;
+    handle.style.cursor = 'grabbing';
+    const onMove = mv => {
+      panel.style.left = (ox + mv.clientX - sx) + 'px';
+      panel.style.top  = (oy + mv.clientY - sy) + 'px';
+    };
+    const onUp = () => {
+      handle.style.cursor = 'grab';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup',   onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup',   onUp);
+    e.preventDefault();
+  });
+}
+
+// ── Data inspector panel ──────────────────────────────────────────────────────
+function setupDataPanel() {
+  const btn   = document.getElementById('dataBtn');
+  const panel = document.getElementById('dataPanel');
+  btn.addEventListener('click', () => {
+    const hidden = panel.classList.toggle('hidden');
+    btn.classList.toggle('active', !hidden);
+    if (!hidden && frames[frameIdx]) updateDataPanel(frames[frameIdx]);
+  });
+  document.getElementById('dataClose').addEventListener('click', () => {
+    panel.classList.add('hidden');
+    btn.classList.remove('active');
+  });
+  makeDraggable(panel, panel.querySelector('.data-panel-hdr'));
+}
+
+function buildDataPanelSections() {
+  const body = document.getElementById('dataPanelBody');
+  body.innerHTML = '';
+  dataValMap = {};
+  if (!frames.length) return;
+
+  const sample = frames[0];
+
+  function makeSec(title) {
+    const sec = document.createElement('div');
+    sec.className = 'data-section';
+    const hdr = document.createElement('div');
+    hdr.className = 'data-section-hdr';
+    hdr.textContent = title;
+    sec.appendChild(hdr);
+    return sec;
+  }
+
+  function addSubHdr(parent, text, cls) {
+    const el = document.createElement('div');
+    el.className = `data-sub-hdr ${cls}`;
+    el.textContent = text;
+    parent.appendChild(el);
+  }
+
+  function addRow(parent, label, elId) {
+    const row = document.createElement('div');
+    row.className = 'data-row';
+    row.innerHTML = `<span class="dk">${label}</span><span class="dv" id="${elId}">—</span>`;
+    parent.appendChild(row);
+    return row.querySelector('.dv');
+  }
+
+  // Named array section (state / action) — groups values by left_*/right_*/other
+  function buildNamedArray(frameKey, title, names) {
+    const arr = sample[frameKey];
+    if (!arr || !Array.isArray(arr)) return;
+    const sec = makeSec(title);
+    const els = [];
+
+    const groups = { left: [], right: [], extra: [] };
+    for (let i = 0; i < arr.length; i++) {
+      const name = names[i] || `[${i}]`;
+      const grp  = name.startsWith('left_') ? 'left'
+                 : name.startsWith('right_') ? 'right' : 'extra';
+      groups[grp].push({ i, name });
+    }
+
+    for (const [grp, cls, label] of [['left','sub-left','LEFT ARM'],['right','sub-right','RIGHT ARM'],['extra','sub-extra','EXTRA']]) {
+      if (!groups[grp].length) continue;
+      addSubHdr(sec, label, cls);
+      for (const { i, name } of groups[grp]) {
+        const lbl = name.replace(/^left_/, '').replace(/^right_/, '');
+        els[i] = addRow(sec, lbl, `dv-${frameKey.replace(/\./g,'-')}-${i}`);
+      }
+    }
+    body.appendChild(sec);
+    dataValMap[frameKey] = els;
+  }
+
+  // Pose / vector section — fixed labels based on array length
+  function buildVecSection(frameKey, title) {
+    const arr = sample[frameKey];
+    if (!arr || !Array.isArray(arr)) return;
+    const labels = arr.length === 7 ? ['x','y','z','qw','qx','qy','qz']
+                 : arr.length === 3 ? ['dx','dy','dz']
+                 : arr.map((_, i) => `[${i}]`);
+    const sec = makeSec(title);
+    const key = frameKey.replace(/[.\s]/g, '-');
+    const els = labels.map((l, i) => addRow(sec, l, `dv-${key}-${i}`));
+    body.appendChild(sec);
+    dataValMap[frameKey] = els;
+  }
+
+  buildNamedArray('observation.state', 'OBS STATE',  stateNames);
+  buildNamedArray('action',            'ACTION',      actionNames);
+  buildVecSection('observation.ee_left',         'OBS EE LEFT');
+  buildVecSection('observation.ee_right',        'OBS EE RIGHT');
+  buildVecSection('action.ee_left',              'ACTION EE LEFT');
+  buildVecSection('action.ee_right',             'ACTION EE RIGHT');
+  buildVecSection('action.ee_left.delta',        'EE DELTA LEFT');
+  buildVecSection('action.ee_right.delta',       'EE DELTA RIGHT');
+  buildVecSection('action.ee_left.relative',     'EE RELATIVE LEFT');
+  buildVecSection('action.ee_right.relative',    'EE RELATIVE RIGHT');
+}
+
+function updateDataPanel(frame) {
+  if (document.getElementById('dataPanel').classList.contains('hidden')) return;
+  for (const [key, els] of Object.entries(dataValMap)) {
+    const data = frame[key];
+    if (!data || !Array.isArray(data)) continue;
+    for (let i = 0; i < els.length; i++) {
+      if (els[i] && i < data.length) els[i].textContent = data[i].toFixed(4);
+    }
+  }
+}
+
+// ── Graphs panel ─────────────────────────────────────────────────────────────
+const SERIES_COLORS = ['#ff6b6b','#ffa94d','#ffd43b','#69db7c','#74c0fc','#da77f2','#f8a5c2'];
+const CHART_H = 72;
+
+let graphChartData = [];  // [{ title, series: [{data, color, label}] }]
+let graphCanvases  = [];
+
+function setupGraphPanel() {
+  const btn   = document.getElementById('graphBtn');
+  const panel = document.getElementById('graphPanel');
+  btn.addEventListener('click', () => {
+    const hidden = panel.classList.toggle('hidden');
+    btn.classList.toggle('active', !hidden);
+    if (!hidden) renderAllCharts();
+  });
+  document.getElementById('graphClose').addEventListener('click', () => {
+    panel.classList.add('hidden');
+    btn.classList.remove('active');
+  });
+  makeDraggable(panel, panel.querySelector('.graph-panel-hdr'));
+}
+
+function buildGraphCharts() {
+  graphChartData = [];
+  graphCanvases  = [];
+  const body = document.getElementById('graphPanelBody');
+  body.innerHTML = '';
+  if (!frames.length) return;
+
+  const sample = frames[0];
+  const dpr    = window.devicePixelRatio || 1;
+
+  function colData(key, idx) {
+    return frames.map(f => { const a = f[key]; return (a && idx < a.length) ? a[idx] : null; });
+  }
+
+  function addGroup(title, series) {
+    const group = document.createElement('div');
+    group.className = 'chart-group';
+
+    const titleEl = document.createElement('div');
+    titleEl.className = 'chart-title';
+    titleEl.textContent = title;
+    group.appendChild(titleEl);
+
+    const canvas = document.createElement('canvas');
+    canvas.className = 'chart-canvas';
+    canvas.style.height = CHART_H + 'px';
+    canvas.height = CHART_H * dpr;
+    group.appendChild(canvas);
+
+    const legend = document.createElement('div');
+    legend.className = 'chart-legend';
+    for (const s of series) {
+      const sp = document.createElement('span');
+      sp.className = 'cleg';
+      sp.style.color = s.color;
+      sp.textContent = s.label;
+      legend.appendChild(sp);
+    }
+    group.appendChild(legend);
+
+    body.appendChild(group);
+    graphChartData.push({ title, series });
+    graphCanvases.push(canvas);
+
+    canvas.addEventListener('click', e => {
+      const rect = canvas.getBoundingClientRect();
+      const idx  = Math.round(((e.clientX - rect.left) / rect.width) * (frames.length - 1));
+      stopPlayback();
+      updateFrame(Math.max(0, Math.min(idx, frames.length - 1)));
+    });
+  }
+
+  function defineNamedArray(frameKey, baseTitle, names) {
+    if (!sample[frameKey]) return;
+    const arr   = sample[frameKey];
+    const left = [], right = [], extra = [];
+    for (let i = 0; i < arr.length; i++) {
+      const name = names[i] || `[${i}]`;
+      const dest = name.startsWith('left_') ? left : name.startsWith('right_') ? right : extra;
+      dest.push({ i, name });
+    }
+    for (const [grp, label] of [[left,'Left'],[right,'Right'],[extra,'Extra']]) {
+      if (!grp.length) continue;
+      const series = grp.map(({ i, name }, j) => ({
+        data:  colData(frameKey, i),
+        color: SERIES_COLORS[j % SERIES_COLORS.length],
+        label: name.replace(/^left_/,'').replace(/^right_/,''),
+      }));
+      addGroup(`${baseTitle} — ${label}`, series);
+    }
+  }
+
+  function defineVec(frameKey, title, dims) {
+    if (!sample[frameKey]) return;
+    const posColors = ['#ff6b6b','#69db7c','#74c0fc'];
+    const colors = dims === 3 ? posColors
+                             : [...posColors,'#da77f2','#ffa94d','#ffd43b','#f8a5c2'];
+    const labels = dims === 3 ? ['dx','dy','dz'] : ['x','y','z','qw','qx','qy','qz'];
+    const series = Array.from({length: dims}, (_, i) => ({
+      data:  colData(frameKey, i),
+      color: colors[i],
+      label: labels[i],
+    }));
+    addGroup(title, series);
+  }
+
+  defineNamedArray('observation.state', 'State',  stateNames);
+  defineNamedArray('action',            'Action', actionNames);
+  defineVec('observation.ee_left',       'Obs EE Left',      7);
+  defineVec('observation.ee_right',      'Obs EE Right',     7);
+  defineVec('action.ee_left',            'Action EE Left',   7);
+  defineVec('action.ee_right',           'Action EE Right',  7);
+  defineVec('action.ee_left.delta',      'EE Delta Left',    3);
+  defineVec('action.ee_right.delta',     'EE Delta Right',   3);
+  defineVec('action.ee_left.relative',   'EE Rel Left',      3);
+  defineVec('action.ee_right.relative',  'EE Rel Right',     3);
+}
+
+function drawChart(canvas, series, fidx) {
+  const dpr  = window.devicePixelRatio || 1;
+  const cssW = canvas.clientWidth || 340;
+  if (canvas.width !== Math.round(cssW * dpr)) canvas.width = Math.round(cssW * dpr);
+
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const W = cssW, H = CHART_H;
+
+  ctx.fillStyle = '#0d1117';
+  ctx.fillRect(0, 0, W, H);
+
+  let lo = Infinity, hi = -Infinity;
+  for (const { data } of series)
+    for (const v of data)
+      if (v != null && isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+  if (!isFinite(lo)) return;
+  if (lo === hi) { lo -= 0.5; hi += 0.5; }
+  const pad = (hi - lo) * 0.06;
+  lo -= pad; hi += pad;
+
+  const n   = series[0]?.data.length || 1;
+  const toX = i => (i / Math.max(n - 1, 1)) * W;
+  const toY = v => H - ((v - lo) / (hi - lo)) * H;
+
+  if (lo < 0 && hi > 0) {
+    const y0 = toY(0);
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 4]);
+    ctx.beginPath(); ctx.moveTo(0, y0); ctx.lineTo(W, y0); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  for (const { data, color } of series) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    let moved = false;
+    for (let i = 0; i < n; i++) {
+      if (data[i] == null) { moved = false; continue; }
+      moved ? ctx.lineTo(toX(i), toY(data[i])) : (ctx.moveTo(toX(i), toY(data[i])), (moved = true));
+    }
+    ctx.stroke();
+  }
+
+  if (fidx >= 0 && n > 1) {
+    const cx = toX(fidx);
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, H); ctx.stroke();
+    for (const { data, color } of series) {
+      if (data[fidx] == null) continue;
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.arc(cx, toY(data[fidx]), 2.5, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+}
+
+function renderAllCharts() {
+  if (document.getElementById('graphPanel').classList.contains('hidden')) return;
+  for (let i = 0; i < graphCanvases.length; i++)
+    drawChart(graphCanvases[i], graphChartData[i].series, frameIdx);
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
   setupJointScene();
@@ -916,6 +1253,8 @@ async function init() {
   setupCameraSync();
   setupModeButtons();
   setupCalibrationUI();
+  setupDataPanel();
+  setupGraphPanel();
   animate();
 
   document.getElementById('playBtn').addEventListener('click', () =>
