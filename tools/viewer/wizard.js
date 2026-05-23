@@ -392,6 +392,63 @@ function renderPreview(frames) {
 
 // ── Chart rendering ───────────────────────────────────────────────────────────
 
+let _wizTooltipEl = null;
+
+function getWizTooltipEl() {
+    if (!_wizTooltipEl) {
+        _wizTooltipEl = document.createElement('div');
+        _wizTooltipEl.style.cssText = [
+            'position:fixed',
+            'background:#161b22',
+            'border:1px solid #30363d',
+            'border-radius:4px',
+            'padding:6px 10px',
+            'font:10px Consolas,Menlo,Monaco,monospace',
+            'color:#e6edf3',
+            'pointer-events:none',
+            'z-index:9999',
+            'display:none',
+            'white-space:nowrap',
+            'max-height:50vh',
+            'overflow-y:auto',
+        ].join(';');
+        document.body.appendChild(_wizTooltipEl);
+    }
+    return _wizTooltipEl;
+}
+
+function externalWizardTooltip({ chart, tooltip }) {
+    const el = getWizTooltipEl();
+    if (!tooltip.opacity) { el.style.display = 'none'; return; }
+
+    const pts = tooltip.dataPoints || [];
+    if (!pts.length) { el.style.display = 'none'; return; }
+
+    let html = `<div style="color:#8b949e;margin-bottom:4px;font-weight:700">frame ${pts[0].label}</div>`;
+    for (const pt of pts) {
+        const color = pt.dataset.borderColor;
+        html += `<div style="display:flex;align-items:center;gap:5px;margin-bottom:1px">` +
+            `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0"></span>` +
+            `<span style="color:#8b949e">${pt.dataset.label}:</span>` +
+            `<span>${typeof pt.raw === 'number' ? pt.raw.toFixed(4) : pt.raw}</span>` +
+            `</div>`;
+    }
+    el.innerHTML = html;
+    el.style.display = 'block';
+
+    const canvasRect = chart.canvas.getBoundingClientRect();
+    let x = canvasRect.left + tooltip.caretX + 14;
+    let y = canvasRect.top  + tooltip.caretY - el.offsetHeight / 2;
+
+    const elW = el.offsetWidth, elH = el.offsetHeight;
+    if (x + elW > window.innerWidth  - 8) x = canvasRect.left + tooltip.caretX - elW - 14;
+    if (y < 8)                             y = 8;
+    if (y + elH > window.innerHeight - 8)  y = window.innerHeight - elH - 8;
+
+    el.style.left = x + 'px';
+    el.style.top  = y + 'px';
+}
+
 const PALETTE = [
     '#4a9eff','#e34c26','#4ec994','#e5b600','#c084fc',
     '#fb7185','#38bdf8','#a3e635','#f97316','#818cf8',
@@ -434,17 +491,8 @@ function makeWizardChart(canvas, data, names, title) {
                 },
                 title: { display: false },
                 tooltip: {
-                    backgroundColor: '#161b22',
-                    borderColor:     '#30363d',
-                    borderWidth:     1,
-                    titleColor:      '#8b949e',
-                    bodyColor:       '#e6edf3',
-                    titleFont:       { family: 'Consolas,Menlo,Monaco,monospace', size: 10 },
-                    bodyFont:        { family: 'Consolas,Menlo,Monaco,monospace', size: 10 },
-                    callbacks: {
-                        title: items => `frame ${items[0].label}`,
-                        label: item  => ` ${item.dataset.label}: ${item.raw.toFixed(4)}`,
-                    },
+                    enabled:  false,
+                    external: externalWizardTooltip,
                 },
                 zoom: {
                     pan:   { enabled: true,  mode: 'x' },
