@@ -44,8 +44,11 @@ from pathlib import Path
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
+from rich.console import Console
+from rich.progress import track
 from scipy.spatial.transform import Rotation
-from tqdm import tqdm
+
+console = Console()
 
 # ── placo / ROS workspace ─────────────────────────────────────────────────────
 # Set ROS_PACKAGE_PATH before importing lerobot so placo can resolve
@@ -328,19 +331,19 @@ def process_dataset(
                 "Remove them first or start from a freshly merged dataset."
             )
 
-    print(f"joint layout : arms-first  (ignores mislabeled metadata)")
-    print(f"  obs  left  → state{_OBS_LEFT_JOINTS}")
-    print(f"  obs  right → state{_OBS_RIGHT_JOINTS}")
+    console.print(f"  joint layout : [dim]arms-first (ignores mislabeled metadata)[/]")
+    console.print(f"    obs  left  → state[dim]{_OBS_LEFT_JOINTS}[/]")
+    console.print(f"    obs  right → state[dim]{_OBS_RIGHT_JOINTS}[/]")
     if include_action:
-        print(f"  act  left  → action{_ACT_LEFT_JOINTS}")
-        print(f"  act  right → action{_ACT_RIGHT_JOINTS}")
-    print(f"ref frame    : {ref_frame}")
-    print(f"include action EE + representations: {include_action}")
+        console.print(f"    act  left  → action[dim]{_ACT_LEFT_JOINTS}[/]")
+        console.print(f"    act  right → action[dim]{_ACT_RIGHT_JOINTS}[/]")
+    console.print(f"  ref frame    : [bold]{ref_frame}[/]")
+    console.print(f"  include action EE : [bold]{include_action}[/]")
 
     left_mount  = _LEFT_MOUNT_XYZ  if ref_frame == "robot_base" else None
     right_mount = _RIGHT_MOUNT_XYZ if ref_frame == "robot_base" else None
 
-    print(f"building placo kinematics from {_WXAI_FOLLOWER_URDF.name} …")
+    console.print(f"  building placo kinematics from [bold]{_WXAI_FOLLOWER_URDF.name}[/] …")
     kin = _make_kinematics()
 
     pq_files = sorted((dataset_root / "data").rglob("*.parquet"))
@@ -358,8 +361,7 @@ def process_dataset(
         shutil.copytree(dataset_root, output_root, dirs_exist_ok=False)
         work_root = output_root
 
-    print(f"Processing {len(pq_files)} parquet file(s) …")
-    for pq_src in tqdm(pq_files):
+    for pq_src in track(pq_files, description=f"  Enriching {len(pq_files)} parquet file(s)…"):
         pq_dst = work_root / pq_src.relative_to(dataset_root)
         tbl = pq.read_table(pq_src)
         tbl = _enrich_table(tbl, kin, left_mount, right_mount, include_action)
@@ -370,9 +372,9 @@ def process_dataset(
     if in_place:
         shutil.rmtree(dataset_root)
         work_root.rename(dataset_root)
-        print(f"\nDone. Dataset enriched in-place at: {dataset_root}")
+        console.print(f"  [green]✔[/]  Dataset enriched in-place at: [bold]{dataset_root}[/]")
     else:
-        print(f"\nDone. Enriched dataset written to: {work_root}")
+        console.print(f"  [green]✔[/]  Enriched dataset written to: [bold]{work_root}[/]")
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
