@@ -21,31 +21,34 @@ from lerobot.utils.rotation import Rotation
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────  
-MOBILE_AI_URDF_PATH = Path(__file__).with_name("mobile_ai.urdf")  
-  
+MOBILE_AI_URDF_PATH = Path(__file__).resolve().parent / "trossen_arm_description" / "urdf" / "generated" / "wxai" / "wxai_follower.urdf"  
 # Hardcode joint names exactly as they appear in the URDF  
-LEFT_JOINTS  = [f"follower_left_joint_{i}"  for i in range(6)]  
-RIGHT_JOINTS = [f"follower_right_joint_{i}" for i in range(6)]  
+FOLLOWER_JOINTS = [f"joint_{i}" for i in range(6)]
   
 # Hardcode the index layout of observation.state / action vectors:  
 #   [left_joint_0..5, left_gripper, right_joint_0..5, right_gripper, ...]  
 LEFT_JOINT_SLICE   = slice(0, 6)  
-LEFT_GRIPPER_IDX   = 6  
+LEFT_GRIPPER_IDX   = 6   # state[6]  / action[6]
 RIGHT_JOINT_SLICE  = slice(7, 13)  
-RIGHT_GRIPPER_IDX  = 13  
+RIGHT_GRIPPER_IDX  = 13  # state[13] / action[13]
+GRIPPER_OPEN       = 0.044  # m, from URDF left/right_carriage_joint upper limit
+GRIPPER_CLOSED     = 0.0    # m
 
-EE_COMPONENTS = ("x", "y", "z", "wx", "wy", "wz")  #wx: pitch wy:roll wz:yaw
+EE_COMPONENTS = ("x", "y", "z", "wx", "wy", "wz")  #wx: pitch - wy:roll - wz:yaw
   
-  
-# ── Kinematics solvers (created once, reused per row) ─────────────────────────  
+
 def _make_solvers(urdf_path: Path) -> tuple[RobotKinematics, RobotKinematics]:  
-    left  = RobotKinematics(str(urdf_path), "follower_left_ee_gripper_link",  LEFT_JOINTS)  
-    right = RobotKinematics(str(urdf_path), "follower_right_ee_gripper_link", RIGHT_JOINTS)  
-    return left, right  
+    left  = RobotKinematics(str(urdf_path), "ee_gripper_link", FOLLOWER_JOINTS)  
+    right = RobotKinematics(str(urdf_path), "ee_gripper_link", FOLLOWER_JOINTS)  
+    return left, right
   
   
 def _fk_to_ee(kinematics: RobotKinematics, joint_angles_deg: np.ndarray) -> list[float]:  
-    T = kinematics.forward_kinematics(joint_angles_deg)  
+    joint_pos_rad = np.deg2rad(np.asarray(joint_angles_deg, dtype=np.float64))
+    for i, joint_name in enumerate(kinematics.joint_names):
+        kinematics.robot.set_joint(joint_name, float(joint_pos_rad[i]))
+    kinematics.robot.update_kinematics()
+    T = kinematics.robot.get_T_world_frame(kinematics.target_frame_name)
     pos    = T[:3, 3]  
     rotvec = Rotation.from_matrix(T[:3, :3]).as_rotvec()  
     return [*pos, *rotvec]   # 6 values: x, y, z, wx, wy, wz  
@@ -133,21 +136,14 @@ def convert_joint_to_ee_and_save_lerobot_dataset(
     }  
     ee_keys = list(add_features.keys())  
   
-    # Two-pass approach: modify_features rejects adding a key that already exists,  
-    # so we add with a temp '_ee' suffix first, then remove the originals.  
-    with tempfile.TemporaryDirectory() as tmp_dir:  
-        intermediate = modify_features(  
-            dataset=source_dataset,  
-            add_features=add_features,  
-            output_dir=Path(tmp_dir) / "intermediate",  
-            repo_id=f"{output_repo_id}_intermediate",  
-        )  
-        converted = modify_features(  
-            dataset=intermediate,  
-            remove_features=keys_to_convert,  
-            output_dir=output_dir,  
-            repo_id=output_repo_id,  
-        )  
+    # Single pass: just add the _ee columns, keep the original joint columns
+    converted = modify_features(  
+        dataset=source_dataset,  
+        add_features=add_features,  
+        output_dir=output_dir,  
+        repo_id=output_repo_id,  
+    )  
+    
   
     _recompute_stats(converted, ee_keys)  
     return converted
@@ -257,8 +253,8 @@ if should_run("conversion"):
         print(f"Converting dataset: {repo_id} at {dataset_path}")
         try:
             convert_dataset(
-                repo_id=str(base_dataset_root.name + "/" + repo_id), # e.g. Manisha-Saleha/move-blue-cup-feb12-v1.1
-                root=str(base_dataset_root.parent), # e.g. ~/.cache/huggingface/lerobot
+                repo_id=repo_id,
+                root=dataset_path,
                 push_to_hub=False
             )
             conversion_ok.append((repo_id, "converted"))
@@ -337,7 +333,12 @@ if should_run("joint_to_ee"):
 
     joint_to_ee_cfg = cfg.get("joint_to_ee", {})
     source_repo_id = joint_to_ee_cfg.get("source_repo_id", merged_repo_id)
-    source_dir = Path(joint_to_ee_cfg.get("source_dir", output_directory)).expanduser()
+    source_dir_cfg = joint_to_ee_cfg.get("source_dir")
+    source_dir = (
+        Path(source_dir_cfg).expanduser()
+        if source_dir_cfg is not None
+        else base_dataset_root / source_repo_id
+    )
 
     output_repo_id = joint_to_ee_cfg.get("output_repo_id", f"{source_repo_id}_ee")
     output_dir_cfg = joint_to_ee_cfg.get("output_dir")
@@ -363,8 +364,9 @@ if should_run("joint_to_ee"):
     if source_dataset is None:
         if not source_dir.is_dir():
             raise FileNotFoundError(f"Joint-to-EE source dataset not found: {source_dir}")
-        print(f"Loading source dataset for joint-to-EE conversion: {source_repo_id} from {source_dir}")
-        source_dataset = LeRobotDataset(repo_id=source_repo_id, root=source_dir)
+        local_repo_id = source_dir.name
+        print(f"Loading source dataset for joint-to-EE conversion: {local_repo_id} from {source_dir}")
+        source_dataset = LeRobotDataset(repo_id=local_repo_id, root=source_dir)
 
     converted_dataset = convert_joint_to_ee_and_save_lerobot_dataset(
         source_dataset=source_dataset,

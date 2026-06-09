@@ -5,44 +5,34 @@
 
 # ── Pipeline control ──────────────────────────────────────────────────────────
 # These can be overridden at runtime with --start-from / --stop-at CLI flags.
-start_from: conversion  # Options: conversion | merge | upload
-stop_at: upload         # Options: conversion | merge | upload
+start_from: conversion  # Options: conversion | merge | joint_to_ee | upload
+stop_at: joint_to_ee         # Options: conversion | merge | joint_to_ee | upload
 
 # ── Dataset location ──────────────────────────────────────────────────────────
-base_path: ~/.cache/huggingface/lerobot/manisha-saleha
+base_path: .
 
 # ── Output dataset name ───────────────────────────────────────────────────────
-merged_name: aloha_geometry_dataset_27_april
+merged_name: paper-cup-box-22-Jan-merged
+
+# ── Joint-space to end-effector conversion ───────────────────────────────────
+# Runs after merge when the pipeline range includes joint_to_ee.
+joint_to_ee:
+  output_repo_id: paper-cup-box-22-Jan-merged_ee
+  feature_keys:
+    - observation.state
+    - action
 
 # ── Datasets to merge ─────────────────────────────────────────────────────────
 # List the folder names (relative to base_path) that you want to merge.
 # Comment out entries you want to skip.
 datasets:
-  - pick_and_place_task_prompt3_v1
-  - pick_and_place_task_prompt2_v2
-  - pick_and_place_task_prompt2_v1
-  - pick_and_place_task_prompt1_v2
-  - pick_and_place_task_prompt1_v1
-  - stacking_task_prompt3_v3
-  - stacking_task_prompt3_v2
-  - stacking_task_prompt3_v1
-  - stacking_task_prompt2_v2
-  - stacking_task_prompt2_v1
-  - stacking_task_prompt1_v1
-  - pick_and_place_prompt5_v.1
-  - pick_and_place_prompt4_v.2
-  - pick_and_place_prompt4_v.1
-  - pick_and_place_prompt3_v.2
-  - pick_and_place_prompt3_v.1
-  - pick_and_place_prompt2_v.2
-  - pick_and_place_prompt2_v.1
-  - pick_and_place_prompt1_v.2
-  - pick_and_place_prompt1_v.1
+- paper-cup-box-22-Jan
+- paper-cup-box-22-Jan-copy
 
 # ── SFTP upload configuration ─────────────────────────────────────────────────
 sftp:
   hostname: 10.151.31.7
   port: 22
-  username: ibrahim.khadraoui
-  password: Ibra@2026???
+  username: saleha.albreiki
+  password: 
   remote_path: /lustre1/tier2/projects/falcon-vla/vla_data/post_train/custom_data/aidrc_aloha_collected/
