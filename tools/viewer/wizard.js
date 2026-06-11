@@ -10,13 +10,13 @@ let _previewCharts  = [];    // active Chart.js instances in preview panel
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     setupConfig();
     setupPipeline();
     setupRun();
     setupPreview();
     setupFileBrowser();
-    loadConfig();
+    await loadConfig();
     loadPreviewDatasets();
 });
 
@@ -157,7 +157,7 @@ async function refreshDatasets(preChecked = null) {
 
 // ── Pipeline ──────────────────────────────────────────────────────────────────
 
-const STAGES = ['conversion', 'merge', 'ee_conversion', 'upload'];
+const STAGES = ['conversion', 'merge', 'ee_conversion', 'compress', 'upload'];
 
 function setupPipeline() {
     document.getElementById('start-from').addEventListener('change', updatePipelineHighlight);
@@ -198,7 +198,7 @@ function setupRun() {
     document.getElementById('btn-run').addEventListener('click', runPipeline);
     document.getElementById('btn-stop').addEventListener('click', stopPipeline);
     document.getElementById('btn-clear-log').addEventListener('click', () => {
-        document.getElementById('log-output').textContent = '';
+        document.getElementById('log-output').innerHTML = '';
     });
 }
 
@@ -265,9 +265,96 @@ function stopPipeline() {
 }
 
 function appendLog(line) {
-    const el = document.getElementById('log-output');
-    el.textContent += line + '\n';
+    const el   = document.getElementById('log-output');
+    const node = document.createElement('span');
+    node.innerHTML = ansiToHtml(line) + '\n';
+    el.appendChild(node);
     el.scrollTop = el.scrollHeight;
+}
+
+// Convert ANSI SGR escape sequences to HTML spans.
+// Handles: 8-color, 256-color, true-color (24-bit), bold, dim, italic.
+function ansiToHtml(text) {
+    const esc = s => s
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
+    // ANSI 4-bit palette mapped to dark-theme colors
+    const ansi16 = [
+        '#21262d', '#ff6b6b', '#51cf66', '#ffd43b',
+        '#74c0fc', '#da77f2', '#3bc9db', '#abb8c3',
+        '#484f58', '#ff8787', '#69db7c', '#ffe066',
+        '#91c7f3', '#e599f7', '#66d9e8', '#f1f3f5',
+    ];
+
+    let state = { fg: null, bold: false, dim: false, italic: false };
+    let currentStyle = null;
+    let html = '';
+
+    function stateStyle(s) {
+        let st = '';
+        if (s.fg)     st += `color:${s.fg};`;
+        if (s.bold)   st += 'font-weight:bold;';
+        if (s.dim)    st += 'opacity:0.55;';
+        if (s.italic) st += 'font-style:italic;';
+        return st || null;
+    }
+
+    function syncSpan() {
+        const ns = stateStyle(state);
+        if (ns === currentStyle) return;
+        if (currentStyle !== null) html += '</span>';
+        if (ns !== null) html += `<span style="${ns}">`;
+        currentStyle = ns;
+    }
+
+    const re = /\x1b\[([0-9;]*)([A-Za-z])/g;
+    let last = 0, m;
+
+    while ((m = re.exec(text)) !== null) {
+        if (m.index > last) { syncSpan(); html += esc(text.slice(last, m.index)); }
+        last = re.lastIndex;
+        if (m[2] !== 'm') continue;
+
+        const codes = m[1] ? m[1].split(';').map(Number) : [0];
+        let i = 0;
+        while (i < codes.length) {
+            const c = codes[i];
+            if (c === 0)  { state = { fg: null, bold: false, dim: false, italic: false }; }
+            else if (c === 1)  { state.bold   = true; }
+            else if (c === 2)  { state.dim    = true; }
+            else if (c === 3)  { state.italic = true; }
+            else if (c === 22) { state.bold   = false; state.dim = false; }
+            else if (c === 39) { state.fg = null; }
+            else if (c >= 30 && c <= 37) { state.fg = ansi16[c - 30]; }
+            else if (c >= 90 && c <= 97) { state.fg = ansi16[c - 90 + 8]; }
+            else if (c === 38) {
+                if (codes[i + 1] === 5 && i + 2 < codes.length) {
+                    const idx = codes[i + 2];
+                    if (idx < 16) {
+                        state.fg = ansi16[idx];
+                    } else if (idx < 232) {
+                        const n = idx - 16;
+                        const r = Math.floor(n / 36), g = Math.floor((n % 36) / 6), b = n % 6;
+                        state.fg = `rgb(${r * 51},${g * 51},${b * 51})`;
+                    } else {
+                        const v = (idx - 232) * 10 + 8;
+                        state.fg = `rgb(${v},${v},${v})`;
+                    }
+                    i += 2;
+                } else if (codes[i + 1] === 2 && i + 4 < codes.length) {
+                    state.fg = `rgb(${codes[i + 2]},${codes[i + 3]},${codes[i + 4]})`;
+                    i += 4;
+                }
+            }
+            i++;
+        }
+    }
+
+    if (last < text.length) { syncSpan(); html += esc(text.slice(last)); }
+    if (currentStyle !== null) html += '</span>';
+    return html;
 }
 
 function showStatus(msg, type) {
@@ -288,10 +375,14 @@ function setupPreview() {
 }
 
 async function loadPreviewDatasets() {
-    const sel = document.getElementById('preview-dataset');
-    const cur = sel.value;
+    const sel      = document.getElementById('preview-dataset');
+    const cur      = sel.value;
+    const basePath = get('base-path');
+    const url      = basePath
+        ? `/api/datasets?path=${encodeURIComponent(basePath)}`
+        : '/api/datasets';
     try {
-        const datasets = await api('/api/datasets');
+        const datasets = await api(url);
         _datasetMeta = {};
         for (const d of datasets) {
             _datasetMeta[d.path] = {

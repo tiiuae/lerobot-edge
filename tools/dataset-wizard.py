@@ -23,21 +23,13 @@ import json
 import os
 import shutil
 import sys
+import zipfile
 from pathlib import Path
 
 import paramiko
 import yaml
 from rich.console import Console
 from rich.panel import Panel
-from rich.progress import (
-    BarColumn,
-    DownloadColumn,
-    Progress,
-    SpinnerColumn,
-    TextColumn,
-    TimeRemainingColumn,
-    TransferSpeedColumn,
-)
 from rich.prompt import Confirm
 from rich.table import Table
 
@@ -53,7 +45,7 @@ console = Console()
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
-STAGES = ["conversion", "merge", "ee_conversion", "upload"]
+STAGES = ["conversion", "merge", "ee_conversion", "compress", "upload"]
 
 
 def parse_args():
@@ -246,14 +238,67 @@ else:
     console.print("[dim]Skipping EE conversion stage.[/]")
 
 
-# ── Stage 4: Upload ───────────────────────────────────────────────────────────
+# ── Stage 4: Compress ─────────────────────────────────────────────────────────
+
+if should_run("compress"):
+    console.rule("[bold cyan]Stage 4 — Compress[/]")
+    zip_path = output_directory.with_suffix(".zip")
+
+    if not output_directory.is_dir():
+        console.print(Panel(
+            f"[bold]{output_directory}[/] does not exist.\n\n"
+            "If you renamed the merged dataset, update the "
+            "[bold cyan]Merged Name[/] field in the wizard to match "
+            "the new directory name, then save the config and re-run.",
+            title="[bold red]Compress Failed — Directory Not Found[/]",
+            border_style="red",
+        ))
+        raise SystemExit(1)
+
+    files = sorted(f for f in output_directory.rglob("*") if f.is_file())
+    total = len(files)
+
+    if total == 0:
+        console.print(Panel(
+            f"[bold]{output_directory}[/] exists but contains no files.\n\n"
+            "Check that the [bold cyan]Merged Name[/] field points to a "
+            "valid LeRobot dataset directory.",
+            title="[bold red]Compress Failed — Empty Directory[/]",
+            border_style="red",
+        ))
+        raise SystemExit(1)
+
+    console.print(f"  Compressing [bold]{total}[/] files → [bold]{zip_path.name}[/] …\n")
+
+    step = max(1, total // 25)
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for i, f in enumerate(files):
+            zf.write(f, f.relative_to(output_directory))
+            n = i + 1
+            if n % step == 0 or n == total:
+                pct    = n / total * 100
+                filled = int(30 * n / total)
+                bar    = "█" * filled + "░" * (30 - filled)
+                console.print(
+                    f"  [[[cyan]{bar}[/cyan]] [cyan]{pct:5.1f}%[/]  [dim]{n}/{total} files[/]"
+                )
+
+    zip_mb = zip_path.stat().st_size / 1024**2
+    console.print(f"\n  [green]✔[/]  Compressed: [dim]{zip_path}[/]  ({zip_mb:.1f} MB)\n")
+else:
+    console.print("[dim]Skipping compress stage.[/]")
+
+
+# ── Stage 5: Upload ───────────────────────────────────────────────────────────
 
 if should_run("upload"):
-    console.rule("[bold cyan]Stage 4 — Compress and upload[/]")
+    console.rule("[bold cyan]Stage 5 — Upload (SFTP)[/]")
     zip_path = output_directory.with_suffix(".zip")
-    console.print(f"  Compressing [bold]{output_directory.name}[/] → [bold]{zip_path.name}[/] …")
-    shutil.make_archive(str(output_directory), "zip", str(output_directory))
-    console.print(f"  [green]✔[/]  Compressed: [dim]{zip_path}[/]\n")
+
+    if not zip_path.exists():
+        console.print(f"  [red]✘[/]  Archive not found: [bold]{zip_path}[/]")
+        console.print("  Run the compress stage first (or start from compress).")
+        raise SystemExit(1)
 
     sftp_cfg    = cfg.get("sftp", {})
     hostname    = str(sftp_cfg["hostname"])
@@ -271,29 +316,31 @@ if should_run("upload"):
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     ssh.connect(hostname, port, username, password)
     sftp = ssh.open_sftp()
-    console.print("  SFTP connection established.")
+    console.print("  [green]✔[/]  SFTP connection established.")
 
     remote_file = remote_path + zip_path.name
     file_size   = os.path.getsize(str(zip_path))
-    console.print(f"  Uploading [bold]{zip_path.name}[/] → [dim]{remote_file}[/] …\n")
+    total_mb    = file_size / 1024**2
+    console.print(
+        f"  Uploading [bold]{zip_path.name}[/] → [dim]{remote_file}[/]  ({total_mb:.1f} MB)\n"
+    )
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        DownloadColumn(),
-        TransferSpeedColumn(),
-        TimeRemainingColumn(),
-        console=console,
-    ) as progress:
-        task = progress.add_task(zip_path.name, total=file_size)
-        last = {"sent": 0}
+    last_pct = [0]
 
-        def _cb(transferred: int, _total: int):
-            progress.update(task, advance=transferred - last["sent"])
-            last["sent"] = transferred
+    def _cb(transferred: int, total: int):
+        pct = int(transferred / total * 100)
+        if pct >= last_pct[0] + 5 or transferred == total:
+            mb     = transferred / 1024**2
+            filled = int(30 * transferred / total)
+            bar    = "█" * filled + "░" * (30 - filled)
+            console.print(
+                f"  [[[cyan]{bar}[/cyan]] [cyan]{pct:3d}%[/]  {mb:.1f}/{total_mb:.1f} MB"
+            )
+            last_pct[0] = pct
 
-        sftp.put(str(zip_path), remote_file, callback=_cb)
+    sftp.put(str(zip_path), remote_file, callback=_cb)
+    sftp.close()
+    ssh.close()
 
     console.print(Panel(
         f"[green]✔[/]  [bold]{remote_file}[/]",

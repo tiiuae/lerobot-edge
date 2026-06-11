@@ -57,7 +57,8 @@ def _run_job(job_id: str, cmd: list, cwd: str):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True, bufsize=1,
-            env={**os.environ},
+            env={**os.environ, "FORCE_COLOR": "1", "COLORTERM": "truecolor",
+                 "PYTHONUNBUFFERED": "1"},
         )
         _jobs[job_id]["process"] = proc
 
@@ -73,7 +74,10 @@ def _run_job(job_id: str, cmd: list, cwd: str):
         threading.Thread(target=_feed, daemon=True).start()
 
         for line in proc.stdout:
-            q.put(line.rstrip())
+            line = line.rstrip()
+            if '\r' in line:
+                line = line.split('\r')[-1]
+            q.put(line)
         proc.wait()
         _jobs[job_id]["returncode"] = proc.returncode
     except Exception as exc:
@@ -262,7 +266,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._file(VIEWER_DIR / p.lstrip("/"))
             # Viewer API
             elif p == "/api/datasets":
-                self._json(find_datasets(self.cache_dir))
+                path_arg = qs.get("path", [None])[0]
+                search_dir = Path(path_arg).expanduser().resolve() if path_arg else self.cache_dir
+                self._json(find_datasets(search_dir))
             elif p == "/api/episodes":
                 self._json(get_episodes(qs.get("dataset", [""])[0]))
             elif p == "/api/frames":
