@@ -310,6 +310,8 @@ class Handler(BaseHTTPRequestHandler):
                 if data.get("ee_include_action"): cmd += ["--ee-include-action"]
                 if data.get("ee_joint_repr") is False:
                     cmd += ["--no-ee-joint-repr"]
+                if data.get("skip_ee"):
+                    cmd += ["--skip-ee"]
 
                 job_id = uuid.uuid4().hex[:8]
                 with _jobs_lock:

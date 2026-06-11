@@ -74,6 +74,8 @@ def parse_args():
                    help="Also compute EE and representations for action joints")
     p.add_argument("--no-ee-joint-repr", action="store_true", default=False,
                    help="Skip joint-space action representations (action.delta, action.relative)")
+    p.add_argument("--skip-ee", action="store_true", default=False,
+                   help="Skip EE conversion stage regardless of start/stop range")
     return p.parse_args()
 
 
@@ -89,9 +91,12 @@ output_directory      = base_dataset_root / merged_repo_id
 
 start_from = args.start_from or cfg.get("start_from", "conversion")
 stop_at    = args.stop_at    or cfg.get("stop_at",    "upload")
+skip_ee    = args.skip_ee
 
 
 def should_run(stage: str) -> bool:
+    if stage == "ee_conversion" and skip_ee:
+        return False
     return STAGES.index(start_from) <= STAGES.index(stage) <= STAGES.index(stop_at)
 
 

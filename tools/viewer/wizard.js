@@ -55,6 +55,8 @@ async function loadConfig() {
         document.getElementById('ee-include-joint-repr').checked =
             jee.include_joint_repr !== false;  // default true when absent
         document.getElementById('ee-include-action').checked = jee.include_action !== false;
+        document.getElementById('ee-enabled').checked = jee.enabled !== false;
+        updateEEEnabled();
 
         const sftp = cfg.sftp || {};
         if (sftp.hostname)    set('sftp-hostname', sftp.hostname);
@@ -84,6 +86,7 @@ function buildConfig() {
         stop_at:     get('stop-at'),
         datasets,
         joint_to_ee: {
+            enabled:            document.getElementById('ee-enabled').checked,
             ee_frame:           get('ee-frame'),
             include_joint_repr: document.getElementById('ee-include-joint-repr').checked,
             include_action:     document.getElementById('ee-include-action').checked,
@@ -159,16 +162,29 @@ const STAGES = ['conversion', 'merge', 'ee_conversion', 'upload'];
 function setupPipeline() {
     document.getElementById('start-from').addEventListener('change', updatePipelineHighlight);
     document.getElementById('stop-at').addEventListener('change', updatePipelineHighlight);
+    document.getElementById('ee-enabled').addEventListener('change', () => {
+        updateEEEnabled();
+        updatePipelineHighlight();
+    });
+    updateEEEnabled();
     updatePipelineHighlight();
 }
 
+function updateEEEnabled() {
+    const on = document.getElementById('ee-enabled').checked;
+    document.getElementById('details-ee').style.display = on ? '' : 'none';
+}
+
 function updatePipelineHighlight() {
-    const si = STAGES.indexOf(get('start-from'));
-    const ei = STAGES.indexOf(get('stop-at'));
+    const si   = STAGES.indexOf(get('start-from'));
+    const ei   = STAGES.indexOf(get('stop-at'));
+    const eeOn = document.getElementById('ee-enabled').checked;
 
     document.querySelectorAll('.stage-node').forEach((node, i) => {
-        node.classList.toggle('active', i >= si && i <= ei);
-        node.classList.toggle('dim',   i < si || i > ei);
+        const stage  = node.dataset.stage;
+        const active = i >= si && i <= ei && !(stage === 'ee_conversion' && !eeOn);
+        node.classList.toggle('active', active);
+        node.classList.toggle('dim',    !active);
     });
     document.querySelectorAll('.stage-connector').forEach((el, i) => {
         el.classList.toggle('active', i >= si && i < ei);
@@ -203,6 +219,7 @@ async function runPipeline() {
             ee_frame:          cfg.joint_to_ee?.ee_frame,
             ee_joint_repr:     cfg.joint_to_ee?.include_joint_repr !== false,
             ee_include_action: cfg.joint_to_ee?.include_action !== false,
+            skip_ee:           cfg.joint_to_ee?.enabled === false,
         });
     } catch (e) {
         showStatus('Failed to start pipeline: ' + e.message, 'err');

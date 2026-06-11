@@ -271,6 +271,20 @@ button {
 .stage-lbl { font-size: 10px; color: var(--muted); white-space: nowrap; }
 .stage-node.active .stage-lbl { color: var(--text); }
 
+.stage-opt {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    cursor: pointer;
+    font-size: 9px;
+    color: var(--muted);
+    user-select: none;
+    margin-top: 2px;
+}
+.stage-opt input  { accent-color: var(--accent); cursor: pointer; }
+.stage-opt span   { opacity: 0.6; }
+.stage-node.active .stage-opt span { opacity: 0.85; }
+
 .stage-connector {
     flex: 1;
     height: 2px;
