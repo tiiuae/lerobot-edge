@@ -161,9 +161,11 @@ def get_frames(dataset_path: str, episode_idx: int):
         "observation.state", "action", "timestamp", "frame_index",
         "observation.ee_left",       "observation.ee_right",
         "action.ee_left",            "action.ee_right",
-        "action.ee_left.delta",      "action.ee_right.delta",
-        "action.ee_left.relative",   "action.ee_right.relative",
-        "action.delta",              "action.relative",
+        "action.ee_left.delta",           "action.ee_right.delta",
+        "action.ee_left.relative",        "action.ee_right.relative",
+        "action.ee_left.delta.rotvec",    "action.ee_right.delta.rotvec",
+        "action.ee_left.relative.rotvec", "action.ee_right.relative.rotvec",
+        "action.delta",                   "action.relative",
     ]
     chunks = []
     for pq_file in sorted((root / "data").rglob("*.parquet")):
