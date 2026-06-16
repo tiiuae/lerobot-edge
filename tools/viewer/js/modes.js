@@ -64,7 +64,7 @@ export function updateModeButtonAvailability() {
     if (b.dataset.mode === 'ee_relative' && !S.hasEERel)    unavailable = true;
     b.classList.toggle('unavailable', unavailable);
     b.title = unavailable
-      ? 'Not available for this dataset — re-run joint_to_ee.py with --include-action'
+      ? 'Not available for this dataset — re-run joint_to_ee with --frame robot_base to enrich'
       : '';
     // Fall back to fk if current mode becomes unavailable
     if (unavailable && S.rightMode === b.dataset.mode) setRightMode('fk');
@@ -80,7 +80,7 @@ export function setupModeButtons() {
   document.querySelectorAll('.right-mode-btn').forEach(b =>
     b.addEventListener('click', () => {
       if (b.classList.contains('unavailable')) {
-        setStatus('Mode unavailable — re-run joint_to_ee.py with --include-action to enrich this dataset');
+        setStatus('Mode unavailable — re-run joint_to_ee with --frame robot_base to enrich this dataset');
         return;
       }
       setRightMode(b.dataset.mode);
