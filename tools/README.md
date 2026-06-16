@@ -4,12 +4,13 @@ The `dataset-wizard.py` script provides a complete pipeline for managing and mer
 
 ## Overview
 
-The Dataset Wizard performs four main stages:
+The Dataset Wizard performs five stages:
 
 1. **Conversion** - Convert datasets from v2.1 to v3.0 format
 2. **Merge** - Load and merge individual datasets into a single unified dataset
 3. **EE Conversion** *(opt-in)* - Compute end-effector poses from joint positions using the WidowX AI arm forward kinematics, and add them as new columns to the merged dataset
-4. **Upload** - Compress and upload the merged dataset to an SFTP server
+4. **Compress** - Create a ZIP archive of the merged dataset
+5. **Upload** - Upload the compressed dataset to a remote SFTP server
 
 You can start the pipeline from any stage using the `--start-from` option, allowing you to skip previously completed steps.
 
@@ -96,7 +97,7 @@ The wizard at `/wizard` is a browser-based alternative to running
 - **File browser** — navigate the filesystem to set the base path
 - **Dataset checklist** — select which datasets to include in the merge
 - **Pipeline controls** — choose start/stop stage with live stage highlighting
-- **Collapsible settings** — EE frame, include-action flag, SFTP credentials
+- **Collapsible settings** — EE frame, rotation representation, SFTP credentials
 - **Live log** — streaming output via Server-Sent Events while the pipeline runs
 - **Dataset preview** — time-series charts of `observation.state` and `action`
   columns for any dataset in the cache, episode by episode
@@ -153,18 +154,21 @@ All datasets must be in v2.1 or v3.0 format — v2.1 datasets are converted auto
 The following keys can be set in `config.yaml` to control the EE conversion stage:
 
 ```yaml
-# ── EE conversion (optional) ──────────────────────────────────────────────────
-# Omit or set to null to skip EE conversion entirely.
-ee_frame: arm           # Options: arm | robot_base
-ee_include_action: false  # Set to true to also convert action joints
+joint_to_ee:
+  enabled: true
+  ee_frame: robot_base       # or: arm
+  rot_repr: both             # quat | rotvec | both
+  include_joint_repr: true
 ```
 
 | Key | Required | Default | Description |
 |-----|----------|---------|-------------|
-| `ee_frame` | No | *(unset — stage skipped)* | Reference frame for EE poses. `arm` = each arm's own `base_link`; `robot_base` = robot `base_link` (includes mount offset). |
-| `ee_include_action` | No | `false` | When `true`, EE poses are also computed from `action` joint columns and written as `action.ee_left` / `action.ee_right`. |
+| `joint_to_ee.enabled` | No | `false` (stage skipped) | Set to `true` to enable EE conversion. |
+| `joint_to_ee.ee_frame` | No | `robot_base` | Reference frame for EE poses. `arm` = each arm's own `base_link`; `robot_base` = robot `base_link` (includes mount offset). |
+| `joint_to_ee.rot_repr` | No | `both` | Rotation representation written to parquet. `quat` = quaternion only; `rotvec` = rotation-vector only; `both` = write both variants. |
+| `joint_to_ee.include_joint_repr` | No | `true` | When `true`, the joint-space representation is included alongside the EE columns. |
 
-CLI flags `--ee-frame` and `--ee-include-action` override these config values.
+CLI flags `--ee-frame`, `--ee-rot-repr`, and `--no-ee-joint-repr` override these config values. Pass `--skip-ee` to skip the stage regardless of config.
 
 ## Running the Script
 
@@ -211,7 +215,8 @@ python dataset-wizard.py --start-from ee_conversion --stop-at ee_conversion --ee
 - `conversion` - Start from dataset format conversion (default)
 - `merge` - Skip conversion, start from dataset merging
 - `ee_conversion` - Skip conversion and merge, run only EE conversion
-- `upload` - Skip all earlier stages, start from compression and upload
+- `compress` - Skip to compression stage (dataset already merged)
+- `upload` - Skip all earlier stages, start from upload only
 
 #### `--stop-at` - Stop after a specific pipeline stage
 
@@ -221,14 +226,15 @@ Run only up to (and including) a given stage, skipping the rest:
 # Run conversion and merge only (skip EE conversion and upload)
 python dataset-wizard.py --stop-at merge
 
-# Merge and compute EE poses, skip upload
+# Merge and compute EE poses, skip compress and upload
 python dataset-wizard.py --stop-at ee_conversion --ee-frame arm
 ```
 
 **Options:**
 - `conversion` - Run only the conversion stage
 - `merge` - Stop after merging
-- `ee_conversion` - Stop after EE conversion (skip upload)
+- `ee_conversion` - Stop after EE conversion (skip compress and upload)
+- `compress` - Stop after compression (skip upload)
 - `upload` - Run all stages through upload (default)
 
 Both options can be combined freely:
@@ -254,14 +260,6 @@ python dataset-wizard.py --ee-frame robot_base
 **Options:**
 - `arm` - EE poses are expressed in each arm's `base_link` frame
 - `robot_base` - EE poses are expressed in the robot's `base_link` frame (left arm mounted at xyz=`0.331, 0.3, 0.831`; right arm at `0.331, -0.3, 0.831`)
-
-#### `--ee-include-action` - Also convert action joints to EE poses
-
-When set, EE poses are also computed for the action joint columns and written as `action.ee_left` / `action.ee_right`.
-
-```bash
-python dataset-wizard.py --ee-frame arm --ee-include-action
-```
 
 ### Complete Example
 
@@ -320,21 +318,26 @@ python dataset-wizard.py --start-from merge
 Computes end-effector (EE) poses for each wxai arm using `lerobot.model.kinematics.RobotKinematics` (placo-backed FK over the [trossen_arm_description URDF](https://github.com/TrossenRobotics/trossen_arm_description/blob/main/urdf/macros/_wxai.urdf.xacro)).
 The single-arm URDF `wxai_follower.urdf` is loaded once; the mount transform is applied separately for the `robot_base` frame.
 
-**What gets added** (float32 list of 7 values per frame):
+**What gets added** (float32 list of 8 values per frame):
 
 | New column | Content | Condition |
 |---|---|---|
-| `observation.ee_left` | `[x, y, z, qw, qx, qy, qz]` | Left arm joints found |
-| `observation.ee_right` | `[x, y, z, qw, qx, qy, qz]` | Right arm joints found |
-| `action.ee_left` | `[x, y, z, qw, qx, qy, qz]` | `--ee-include-action` set |
-| `action.ee_right` | `[x, y, z, qw, qx, qy, qz]` | `--ee-include-action` set |
+| `observation.ee_left` | `[x, y, z, qw, qx, qy, qz, gripper]` | Left arm joints found |
+| `observation.ee_right` | `[x, y, z, qw, qx, qy, qz, gripper]` | Right arm joints found |
+| `action.ee_left` | `[x, y, z, qw, qx, qy, qz, gripper]` | Action joints found |
+| `action.ee_right` | `[x, y, z, qw, qx, qy, qz, gripper]` | Action joints found |
 
-**Joint mapping**: the wxai mobile_ai datasets have **mislabeled** `state_names` / `action_names` metadata. The actual column layout is:
+Additional `.rotvec` variants are written when `rot_repr: rotvec` or `rot_repr: both` is set (see config).
 
-- `observation.state[0..6]` = `left_joint_0..6`,  `state[7..13]` = `right_joint_0..6`,  `state[14..18]` = base info
-- `action[0..6]`            = `left_joint_0..6`,  `action[7..13]` = `right_joint_0..6`,  `action[14..15]` = `linear_vel, angular_vel`
+**Joint mapping**: the wxai mobile_ai datasets use an **arms-first** fixed layout:
 
-`joint_6` (gripper, prismatic) is excluded from FK — EE is the `ee_gripper_link` at 156 mm past `link_6`. The conversion uses the **`arms-first`** layout by default, which slices by these fixed indices and ignores the bad names. See [EE_CONVERSION.md](EE_CONVERSION.md) for the full table and the `--joint-layout` flag.
+- `observation.state[0..5]` = `left_joint_0..5`, `state[6]` = `left_joint_6` (gripper)
+- `observation.state[7..12]` = `right_joint_0..5`, `state[13]` = `right_joint_6` (gripper)
+- `action` follows the same layout for joints 0–13
+
+`joint_6` (gripper, prismatic) value is appended to the EE vector as the 8th element — it is not used for FK. EE position is the `ee_gripper_link` at 156 mm past `link_6`. See [EE_CONVERSION.md](EE_CONVERSION.md) for the full column table.
+
+**CLI flags**: use `--ee-rot-repr {quat,rotvec,both}` to override rotation representation, `--no-ee-joint-repr` to suppress the joint-space copy, and `--skip-ee` to skip the stage entirely.
 
 **Dependencies**: `placo` is required (`pip install placo`, or `pip install 'lerobot[kinematics]'`). The script sets `ROS_PACKAGE_PATH` to `/home/edgeai/trossen_arm_ros` at import time so placo can resolve `package://` mesh paths.
 
@@ -462,10 +465,12 @@ Add EE conversion between merge and upload using `config.yaml`:
 
 ```yaml
 # config.yaml
-ee_frame: arm
-ee_include_action: false
 start_from: conversion
 stop_at: upload
+joint_to_ee:
+  enabled: true
+  ee_frame: arm
+  rot_repr: both
 ```
 
 ```bash
@@ -488,8 +493,10 @@ If the dataset is already merged and you just want to add EE columns, set both `
 # config.yaml
 start_from: ee_conversion
 stop_at: ee_conversion
-ee_frame: robot_base       # or arm
-ee_include_action: false
+joint_to_ee:
+  enabled: true
+  ee_frame: robot_base       # or arm
+  rot_repr: both
 ```
 
 ```bash
