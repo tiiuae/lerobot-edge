@@ -3,7 +3,7 @@
 # WARNING: config.yaml may contain SFTP credentials. Do NOT commit it.
 
 # ── Pipeline control ──────────────────────────────────────────────────────────
-# Options: conversion | merge | ee_conversion | upload
+# Options: conversion | merge | ee_conversion | compress | upload
 start_from: conversion
 stop_at: upload
 
@@ -20,28 +20,30 @@ datasets:
   - my-dataset-3
 
 # ── EE conversion + action representations (Stage 3) ─────────────────────────
-# Omit ee_frame (or leave blank) to skip this stage entirely.
+# Set enabled: false to skip this stage. ee_frame is required when enabled.
 #
-# ee_frame options:
-#   robot_base  — EE poses in robot base_link frame (both arms share one frame)
-#   arm         — EE poses in each arm's own base_link frame
+# ee_frame:   robot_base — EE in robot base_link frame (both arms share one frame)
+#             arm        — EE in each arm's own base_link frame
+# rot_repr:   orientation representation for EE delta/relative:
+#             quat   — relative unit quaternion        (delta/relative are [8])
+#             rotvec — rotation vector (axis*angle rad) (delta/relative are [7])
+#             both   — emit both (quat under base name, rotvec under .rotvec)  [default]
+# include_joint_repr: also compute joint-space action.delta / action.relative.
 #
-# include_action: also compute action.ee_left/right and their delta/relative.
-#
-# New columns added to every parquet file:
-#   observation.ee_left        [7]  [x,y,z,qw,qx,qy,qz] absolute EE from state
-#   observation.ee_right       [7]  absolute EE from state
-#   action.delta               [16] sequential joint delta (action[t]-action[t-1])
-#   action.relative            [16] joint action relative to current state
-#   action.ee_left             [7]  absolute EE from action (include_action only)
-#   action.ee_right            [7]  absolute EE from action (include_action only)
-#   action.ee_left.delta       [7]  sequential EE delta    (include_action only)
-#   action.ee_right.delta      [7]  sequential EE delta    (include_action only)
-#   action.ee_left.relative    [7]  action EE - obs EE     (include_action only)
-#   action.ee_right.relative   [7]  action EE - obs EE     (include_action only)
+# Columns added to every parquet file (rot_repr: both):
+#   observation.ee_left/right        [8]  x,y,z,qw,qx,qy,qz,gripper  (from state)
+#   action.ee_left/right             [8]  same (from action — always computed)
+#   action.ee_*.delta                [8]  pos + relative quaternion + gripper
+#   action.ee_*.delta.rotvec         [7]  pos + rotation vector + gripper
+#   action.ee_*.relative             [8]  action EE vs obs EE (quaternion)
+#   action.ee_*.relative.rotvec      [7]  action EE vs obs EE (rotation vector)
+#   action.delta                     [16] sequential joint delta (include_joint_repr)
+#   action.relative                  [16] joint action vs state  (include_joint_repr)
 joint_to_ee:
-  ee_frame: robot_base    # or: arm
-  include_action: false   # set true to also enrich action joints
+  enabled: true
+  ee_frame: robot_base       # or: arm
+  rot_repr: both             # quat | rotvec | both
+  include_joint_repr: true
 
 # ── SFTP upload configuration ─────────────────────────────────────────────────
 sftp:
