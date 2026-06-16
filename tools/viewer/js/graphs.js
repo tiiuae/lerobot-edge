@@ -2,6 +2,7 @@
 
 import { S } from './state.js';
 import { makeDraggable } from './calibration.js';
+import { eeLabels } from './labels.js';
 // stopPlayback and updateFrame are imported here; circular references resolve
 // at runtime since these are only used inside event callbacks.
 import { stopPlayback, updateFrame } from './playback.js';
@@ -184,26 +185,33 @@ export function buildGraphCharts() {
     }
   }
 
-  function defineVec(frameKey, title, dims) {
-    if (!sample[frameKey]) return;
-    const posC  = ['#ff6b6b','#69db7c','#74c0fc'];
-    const colors = dims === 3 ? posC : [...posC,'#da77f2','#ffa94d','#ffd43b','#f8a5c2'];
-    const lbls   = dims === 3 ? ['dx','dy','dz'] : ['x','y','z','qw','qx','qy','qz'];
-    addGroup(title, Array.from({ length: dims }, (_, i) => ({
+  function defineVec(frameKey, title) {
+    const arr = sample[frameKey];
+    if (!arr) return;
+    const len    = arr.length;
+    const lbls   = eeLabels(frameKey, len);
+    const posC   = ['#ff6b6b', '#69db7c', '#74c0fc'];
+    const extraC = ['#da77f2', '#ffa94d', '#ffd43b', '#f8a5c2', '#8ce99a'];
+    const colors = [...posC, ...extraC].slice(0, len);
+    addGroup(title, Array.from({ length: len }, (_, i) => ({
       data: colData(frameKey, i), color: colors[i], label: lbls[i],
     })));
   }
 
   defineNamedArray('observation.state', 'State',  S.stateNames);
   defineNamedArray('action',            'Action', S.actionNames);
-  defineVec('observation.ee_left',      'Obs EE Left',      7);
-  defineVec('observation.ee_right',     'Obs EE Right',     7);
-  defineVec('action.ee_left',           'Action EE Left',   7);
-  defineVec('action.ee_right',          'Action EE Right',  7);
-  defineVec('action.ee_left.delta',     'EE Delta Left',    3);
-  defineVec('action.ee_right.delta',    'EE Delta Right',   3);
-  defineVec('action.ee_left.relative',  'EE Rel Left',      3);
-  defineVec('action.ee_right.relative', 'EE Rel Right',     3);
+  defineVec('observation.ee_left',              'Obs EE Left');
+  defineVec('observation.ee_right',             'Obs EE Right');
+  defineVec('action.ee_left',                   'Action EE Left');
+  defineVec('action.ee_right',                  'Action EE Right');
+  defineVec('action.ee_left.delta',             'EE Delta Left');
+  defineVec('action.ee_right.delta',            'EE Delta Right');
+  defineVec('action.ee_left.relative',          'EE Rel Left');
+  defineVec('action.ee_right.relative',         'EE Rel Right');
+  defineVec('action.ee_left.delta.rotvec',      'EE Delta Rotvec Left');
+  defineVec('action.ee_right.delta.rotvec',     'EE Delta Rotvec Right');
+  defineVec('action.ee_left.relative.rotvec',   'EE Rel Rotvec Left');
+  defineVec('action.ee_right.relative.rotvec',  'EE Rel Rotvec Right');
 }
 
 export function renderAllCharts() {

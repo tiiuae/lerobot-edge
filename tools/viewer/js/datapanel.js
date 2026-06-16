@@ -2,6 +2,7 @@
 
 import { S } from './state.js';
 import { makeDraggable } from './calibration.js';
+import { eeLabels } from './labels.js';
 
 export function setupDataPanel() {
   const btn   = document.getElementById('dataBtn');
@@ -82,9 +83,7 @@ export function buildDataPanelSections() {
   function buildVecSection(frameKey, title) {
     const arr = sample[frameKey];
     if (!arr || !Array.isArray(arr)) return;
-    const labels = arr.length === 7 ? ['x','y','z','qw','qx','qy','qz']
-                 : arr.length === 3 ? ['dx','dy','dz']
-                 : arr.map((_, i) => `[${i}]`);
+    const labels = eeLabels(frameKey, arr.length);
     const sec = makeSec(title);
     const key = frameKey.replace(/[.\s]/g, '-');
     const els = labels.map((l, i) => addRow(sec, l, `dv-${key}-${i}`));
@@ -102,6 +101,10 @@ export function buildDataPanelSections() {
   buildVecSection('action.ee_right.delta',       'EE DELTA RIGHT');
   buildVecSection('action.ee_left.relative',     'EE RELATIVE LEFT');
   buildVecSection('action.ee_right.relative',    'EE RELATIVE RIGHT');
+  buildVecSection('action.ee_left.delta.rotvec',     'EE DELTA ROTVEC LEFT');
+  buildVecSection('action.ee_right.delta.rotvec',    'EE DELTA ROTVEC RIGHT');
+  buildVecSection('action.ee_left.relative.rotvec',  'EE REL ROTVEC LEFT');
+  buildVecSection('action.ee_right.relative.rotvec', 'EE REL ROTVEC RIGHT');
 }
 
 export function updateDataPanel(frame) {
