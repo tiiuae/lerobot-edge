@@ -651,3 +651,7 @@ footer label {
 .axis-x { background: #e74c3c; }
 .axis-y { background: #27ae60; }
 .axis-z { background: #2980b9; }
+
+.fk-stats { font: 10px Consolas, monospace; color: #8b949e; padding: 2px 6px 4px; }
+.fk-err-chart-wrap { height: 90px; padding: 2px 6px 4px; }
+.fk-err-chart-wrap[hidden], .fk-stats[hidden] { display: none; }

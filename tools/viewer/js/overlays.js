@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import * as K from './constants.js';
 import { S } from './state.js';
 import { baseLinkOffset, robot, buildValuesByName, applyRobotJoints, getEEWorldPos, applyJoints } from './robot.js';
+import { frameError } from './validation.js';
 import {
   jRosRoot, eRosRoot,
   jObsLeftMark, jObsRightMark,
@@ -154,6 +155,12 @@ export function updateEE(frame) {
     if (obsL && fkL && S.hasEELeft)  { setLinePoints(errLeftLine,  worldPos(obsL), fkL); errLeftLine.visible  = true; }
     if (obsR && fkR && S.hasEERight) { setLinePoints(errRightLine, worldPos(obsR), fkR); errRightLine.visible = true; }
 
+    // Per-frame FK error readout
+    const eL = obsL ? frameError('left', obsL) : null;
+    const eR = obsR ? frameError('right', obsR) : null;
+    const fmt = e => e ? `${e.posMM.toFixed(1)} mm / ${e.oriDeg.toFixed(1)}°` : '—';
+    updateModeInfo(`FK err  L: ${fmt(eL)}   R: ${fmt(eR)}`);
+
   } else if (S.rightMode === 'obs_action') {
     const actL = frame['action.ee_left'];
     const actR = frame['action.ee_right'];
@@ -191,5 +198,5 @@ export function updateEE(frame) {
     updateModeInfo(`Gap L: ${(magL*1000).toFixed(1)} mm  |  Gap R: ${(magR*1000).toFixed(1)} mm`);
   }
 
-  if (S.rightMode !== 'ee_delta' && S.rightMode !== 'ee_relative') updateModeInfo('');
+  if (S.rightMode !== 'fk' && S.rightMode !== 'ee_delta' && S.rightMode !== 'ee_relative') updateModeInfo('');
 }

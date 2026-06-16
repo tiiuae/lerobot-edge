@@ -6,6 +6,7 @@ import { buildDataPanelSections } from './datapanel.js';
 import { buildGraphCharts } from './graphs.js';
 import { stopPlayback, setStatus, updateFrame } from './playback.js';
 import { updateModeButtonAvailability } from './modes.js';
+import { showFKStats } from './validation.js';
 
 export async function loadDatasets() {
   const list = await fetch('/api/datasets').then(r => r.json());
@@ -65,6 +66,7 @@ export async function loadEpisode(datasetPath, epIdx) {
   buildSecondaryTrajectories();
   buildDataPanelSections();
   buildGraphCharts();
+  if (S.rightMode === 'fk') showFKStats();
   updateFrame(0);
   setStatus(`${S.frames.length} frames at 50 fps  ·  ${(S.frames.length / 50).toFixed(1)} s`);
 }

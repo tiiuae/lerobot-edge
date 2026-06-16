@@ -3,6 +3,7 @@
 import { S } from './state.js';
 import { buildSecondaryTrajectories } from './overlays.js';
 import { updateFrame, setStatus } from './playback.js';
+import { showFKStats, hideFKStats } from './validation.js';
 
 export function setLeftMode(mode) {
   S.leftMode = mode;
@@ -18,6 +19,7 @@ export function setRightMode(mode) {
   document.querySelectorAll('.right-mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
   updateModeLegend();
   buildSecondaryTrajectories();
+  if (mode === 'fk') showFKStats(); else hideFKStats();
   if (S.frames[S.frameIdx]) updateFrame(S.frameIdx);
 }
 
