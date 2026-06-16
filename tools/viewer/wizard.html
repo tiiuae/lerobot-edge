@@ -121,15 +121,18 @@
               <option value="robot_base" selected>robot_base</option>
             </select>
           </div>
+          <div class="field-inline">
+            <label for="ee-rot-repr">Orientation repr</label>
+            <select id="ee-rot-repr">
+              <option value="both" selected>both (quat + rotvec)</option>
+              <option value="quat">quat only</option>
+              <option value="rotvec">rotvec only</option>
+            </select>
+          </div>
           <label class="checkbox-label">
             <input type="checkbox" id="ee-include-joint-repr" checked>
             Include joint representations
             <span class="field-hint">(action.delta, action.relative)</span>
-          </label>
-          <label class="checkbox-label">
-            <input type="checkbox" id="ee-include-action" checked>
-            Include action EE + representations
-            <span class="field-hint">(action.ee_left/right, delta, relative)</span>
           </label>
         </div>
       </details>

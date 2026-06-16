@@ -51,10 +51,10 @@ async function loadConfig() {
         if (cfg.stop_at)     set('stop-at',       cfg.stop_at);
 
         const jee  = cfg.joint_to_ee || {};
-        if (jee.ee_frame) set('ee-frame', jee.ee_frame);
+        if (jee.ee_frame)   set('ee-frame', jee.ee_frame);
+        if (jee.rot_repr)   set('ee-rot-repr', jee.rot_repr);
         document.getElementById('ee-include-joint-repr').checked =
             jee.include_joint_repr !== false;  // default true when absent
-        document.getElementById('ee-include-action').checked = jee.include_action !== false;
         document.getElementById('ee-enabled').checked = jee.enabled !== false;
         updateEEEnabled();
 
@@ -88,8 +88,8 @@ function buildConfig() {
         joint_to_ee: {
             enabled:            document.getElementById('ee-enabled').checked,
             ee_frame:           get('ee-frame'),
+            rot_repr:           get('ee-rot-repr') || 'both',
             include_joint_repr: document.getElementById('ee-include-joint-repr').checked,
-            include_action:     document.getElementById('ee-include-action').checked,
         },
     };
 
@@ -214,12 +214,12 @@ async function runPipeline() {
     let result;
     try {
         result = await apiPost('/api/wizard/run', {
-            start_from:        cfg.start_from,
-            stop_at:           cfg.stop_at,
-            ee_frame:          cfg.joint_to_ee?.ee_frame,
-            ee_joint_repr:     cfg.joint_to_ee?.include_joint_repr !== false,
-            ee_include_action: cfg.joint_to_ee?.include_action !== false,
-            skip_ee:           cfg.joint_to_ee?.enabled === false,
+            start_from:    cfg.start_from,
+            stop_at:       cfg.stop_at,
+            ee_frame:      cfg.joint_to_ee?.ee_frame,
+            ee_rot_repr:   cfg.joint_to_ee?.rot_repr || 'both',
+            ee_joint_repr: cfg.joint_to_ee?.include_joint_repr !== false,
+            skip_ee:       cfg.joint_to_ee?.enabled === false,
         });
     } catch (e) {
         showStatus('Failed to start pipeline: ' + e.message, 'err');
