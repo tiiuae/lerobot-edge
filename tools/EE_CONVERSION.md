@@ -1,6 +1,6 @@
 # End-Effector Conversion Guide
 
-This guide explains how `joint-to-ee.py` computes end-effector (EE) poses from joint angles, the joint-column layout it expects, and how to choose between the two available reference frames.
+This guide explains how `joint_to_ee` computes end-effector (EE) poses from joint angles, the joint-column layout it expects, and how to choose between the two available reference frames.
 
 ---
 
@@ -10,36 +10,46 @@ The robot stores joint angles at each timestep — one angle per motor. The end-
 
 The result is added as new columns in every parquet file:
 
-| Column | Values | Written when |
+| Column | Shape | Contents |
 |---|---|---|
-| `observation.ee_left` | `[x, y, z, qw, qx, qy, qz]` | Left arm joints found |
-| `observation.ee_right` | `[x, y, z, qw, qx, qy, qz]` | Right arm joints found |
-| `action.ee_left` | `[x, y, z, qw, qx, qy, qz]` | `--include-action` set |
-| `action.ee_right` | `[x, y, z, qw, qx, qy, qz]` | `--include-action` set |
+| `observation.ee_left` | `[8]` | `x,y,z,qw,qx,qy,qz,gripper` — gripper∈[0,1] |
+| `observation.ee_right` | `[8]` | same for right arm |
+| `action.ee_left` | `[8]` | same, from action joints (**always** computed) |
+| `action.ee_right` | `[8]` | same for right arm |
+| `action.ee_left.delta` | `[8]` | `Δx,Δy,Δz, qrw,qrx,qry,qrz, Δgrip` — orientation = relative unit quaternion |
+| `action.ee_left.delta.rotvec` | `[7]` | `Δx,Δy,Δz, rx,ry,rz, Δgrip` — orientation = rotation vector (rad) |
+| `action.ee_left.relative` | `[8]` | quat form, action-EE vs obs-EE |
+| `action.ee_left.relative.rotvec` | `[7]` | rotvec form |
+| `action.ee_right.delta` | `[8]` | mirrors left |
+| `action.ee_right.delta.rotvec` | `[7]` | mirrors left |
+| `action.ee_right.relative` | `[8]` | mirrors left |
+| `action.ee_right.relative.rotvec` | `[7]` | mirrors left |
+| `action.delta` | `[16]` | joint-space sequential delta |
+| `action.relative` | `[16]` | joint-space relative |
 
-Each pose is a 7-element float32 vector: position `[x, y, z]` in metres, orientation as a quaternion `[qw, qx, qy, qz]`.
+> **`--rot-repr` controls which delta/relative columns are written:**
+> - `quat` → only the `[8]` columns (no `.rotvec` suffix)
+> - `rotvec` → only the `[7]` form, written under the **base name** (no `.rotvec` suffix)
+> - `both` (default) → both `[8]` and `[7]` columns
 
 ---
 
-## Joint-Column Layout (read this first)
+## Joint-Column Layout
 
-The wxai mobile_ai datasets carry **mislabeled** feature names in `meta/info.json`. The names claim indices `0..4` of `observation.state` are odom + base velocities, but the actual data starts at `left_joint_0`.
+The layout is **fixed** (arms-first). There is no `--joint-layout` flag.
 
-| Index | What the metadata claims | What it really is |
-|---|---|---|
-| `state[0..6]`   | `odom_x, odom_y, odom_theta, linear_vel, angular_vel, left_joint_0, left_joint_1` | `left_joint_0 … left_joint_6` |
-| `state[7..13]`  | `left_joint_2 … right_joint_1` | `right_joint_0 … right_joint_6` |
-| `state[14..18]` | `right_joint_2 … right_joint_6` | base info (odom + lin/ang vel) |
-| `action[0..6]`  | `linear_vel, angular_vel, left_joint_0..4` | `left_joint_0 … left_joint_6` |
-| `action[7..13]` | `left_joint_5..6, right_joint_0..4` | `right_joint_0 … right_joint_6` |
-| `action[14..15]` | `right_joint_5, right_joint_6` | `linear_vel, angular_vel` |
+| Index range | Contents |
+|---|---|
+| `observation.state[0..5]` | Left arm joints 0–5 (radians) |
+| `observation.state[6]` | Left gripper (meters, normalized to [0,1] in EE vector) |
+| `observation.state[7..12]` | Right arm joints 0–5 (radians) |
+| `observation.state[13]` | Right gripper (meters, normalized to [0,1]) |
+| `action[0..5]` | Left arm action joints |
+| `action[6]` | Left gripper action |
+| `action[7..12]` | Right arm action joints |
+| `action[13]` | Right gripper action |
 
-`joint_6` is the gripper finger (prismatic) — excluded from FK; the EE is the `ee_gripper_link` fixed 156 mm past `link_6`.
-
-### `--joint-layout` flag
-
-- **`arms-first`** *(default)* — ignores the bad metadata and slices by index: left = `[0..5]`, right = `[7..12]`.
-- **`names`** — uses the dataset's feature-name list. Only correct when you've verified the metadata is not mislabeled.
+`joint_5` is the last revolute joint — the EE is the `ee_gripper_link` fixed 156 mm past `link_5`. The gripper finger value is extracted separately and appended as the 8th component of the EE vector.
 
 ---
 
@@ -49,7 +59,7 @@ The Mobile AI robot has two WidowX AI (wxai) arms mounted on a wheeled base. Eac
 
 ```mermaid
 graph TD
-    BASE["🤖 robot base_link\n(origin: 0, 0, 0)"]
+    BASE["robot base_link\n(origin: 0, 0, 0)"]
 
     BASE -->|"mount xyz: 0.331, +0.30, 0.831"| LBASE["left arm base_link"]
     BASE -->|"mount xyz: 0.331, −0.30, 0.831"| RBASE["right arm base_link"]
@@ -60,7 +70,7 @@ graph TD
     LJ2   --> LJ3["joint_3  (rot −Y)"]
     LJ3   --> LJ4["joint_4  (rot −Z)"]
     LJ4   --> LJ5["joint_5  (rot X)"]
-    LJ5   -->|"fixed +156 mm"| LEE["✋ ee_gripper_link  (left)"]
+    LJ5   -->|"fixed +156 mm"| LEE["ee_gripper_link  (left)"]
 
     RBASE --> RJ0["joint_0  (rot Z)"]
     RJ0   --> RJ1["joint_1  (rot Y)"]
@@ -68,8 +78,17 @@ graph TD
     RJ2   --> RJ3["joint_3  (rot −Y)"]
     RJ3   --> RJ4["joint_4  (rot −Z)"]
     RJ4   --> RJ5["joint_5  (rot X)"]
-    RJ5   -->|"fixed +156 mm"| REE["✋ ee_gripper_link  (right)"]
+    RJ5   -->|"fixed +156 mm"| REE["ee_gripper_link  (right)"]
 ```
+
+### Mount transforms
+
+These match the `follower_left/right_mount_joint` entries in `mobile_ai.urdf` exactly:
+
+| Arm | Translation (m) | Rotation |
+|---|---|---|
+| Left | `[0.331, 0.3, 0.831]` | identity |
+| Right | `[0.331, -0.3, 0.831]` | identity |
 
 ---
 
@@ -84,18 +103,18 @@ The EE pose is expressed **relative to each arm's own `base_link`**.
 - Origin = the base of the arm itself (where it bolts onto the mount)
 - The left and right arms have **independent** coordinate systems
 - The pose does not encode where the arm sits on the robot body
-- **Not the default** — must be explicitly set with `--frame arm` or `ee_frame: arm`
+- Must be explicitly set with `--frame arm` or `ee_frame: arm`
 
 ```mermaid
 graph LR
     subgraph Left arm frame
-        LBASE2["📍 origin (left arm base_link)"]
-        LBASE2 -->|"FK(q_left)"| LEE2["✋ EE pose [x, y, z, qw, qx, qy, qz]"]
+        LBASE2["origin (left arm base_link)"]
+        LBASE2 -->|"FK(q_left)"| LEE2["EE pose [8]"]
     end
 
     subgraph Right arm frame
-        RBASE2["📍 origin (right arm base_link)"]
-        RBASE2 -->|"FK(q_right)"| REE2["✋ EE pose [x, y, z, qw, qx, qy, qz]"]
+        RBASE2["origin (right arm base_link)"]
+        RBASE2 -->|"FK(q_right)"| REE2["EE pose [8]"]
     end
 ```
 
@@ -113,13 +132,13 @@ The EE pose is expressed **relative to the robot's `base_link`**.
 
 ```mermaid
 graph LR
-    ROBOT["📍 origin (robot base_link)"]
+    ROBOT["origin (robot base_link)"]
 
     ROBOT -->|"T_mount_left (+0.331, +0.30, +0.831)"| LBASE3["left arm base_link"]
-    LBASE3 -->|"FK(q_left)"| LEE3["✋ left EE pose"]
+    LBASE3 -->|"FK(q_left)"| LEE3["left EE pose [8]"]
 
     ROBOT -->|"T_mount_right (+0.331, −0.30, +0.831)"| RBASE3["right arm base_link"]
-    RBASE3 -->|"FK(q_right)"| REE3["✋ right EE pose"]
+    RBASE3 -->|"FK(q_right)"| REE3["right EE pose [8]"]
 ```
 
 **Use this when:** you need both arms in a shared world frame — e.g. "how far apart are the two grippers?", or when the policy conditions on robot-relative gripper positions.
@@ -152,7 +171,7 @@ flowchart TD
     PQ["Parquet file
 observation.state / action"]
     PQ --> SLICE["Slice joint columns
-(--joint-layout arms-first / names)"]
+(arms-first layout: left=[0..5], right=[7..12])"]
 
     SLICE --> RAD2DEG["rad → deg
 (placo expects degrees)"]
@@ -168,17 +187,20 @@ observation.state / action"]
 T = T_mount · T_ee"]
     MOUNT --> POSE_RB["T_ee  in robot base frame"]
 
-    POSE_ARM --> SE3["Convert SE3 → pose7
-[x, y, z, qw, qx, qy, qz]"]
+    POSE_ARM --> SE3["Convert SE3 → pose8
+[x, y, z, qw, qx, qy, qz, gripper]"]
     POSE_RB  --> SE3
 
     SE3 --> OUT["Write to parquet:
-observation.ee_left
-observation.ee_right"]
+observation.ee_left [8]
+observation.ee_right [8]
+action.ee_left [8]
+action.ee_right [8]
++ delta / relative columns"]
     OUT --> INFO["Update meta/info.json"]
 ```
 
-The wxai single-arm URDF defines the chain natively — no joint axes / signs / offsets are hard-coded in the script any more:
+The wxai single-arm URDF defines the chain natively — no joint axes / signs / offsets are hard-coded in the script:
 
 | Joint | Origin offset (m) | Rotation axis (in URDF) |
 |---|---|---|
@@ -192,6 +214,69 @@ The wxai single-arm URDF defines the chain natively — no joint axes / signs / 
 
 ---
 
+## Quaternion Convention and Orientation Math
+
+### Convention
+
+Throughout the codebase quaternions are stored as `[qw, qx, qy, qz]`. scipy's `Rotation.as_quat()` returns `[qx,qy,qz,qw]` — convert at the boundary before writing to parquet.
+
+### Orientation delta/relative
+
+EE delta and relative orientations are computed via the proper **relative rotation** formula:
+
+```
+R_rel = R_ref⁻¹ · R_cur
+```
+
+This is geometrically correct: it computes the rotation that takes the reference orientation to the current orientation. It always produces a valid unit quaternion regardless of the magnitude of the rotation change.
+
+This replaced the older naive component-wise quaternion subtraction, which was only a valid approximation for small rotations and produced non-unit quaternions for larger changes.
+
+The relative rotation is emitted in two forms (controlled by `--rot-repr`):
+
+| Form | Dims | Description |
+|---|---|---|
+| Unit quaternion `[qrw,qrx,qry,qrz]` | 4 | Canonical form, `qrw ≥ 0`; combined with `[Δx,Δy,Δz,Δgrip]` → **8-dim** |
+| Rotation vector `[rx,ry,rz]` | 3 | Axis × angle in radians (scipy `as_rotvec()`); combined with `[Δx,Δy,Δz,Δgrip]` → **7-dim** |
+
+---
+
+## Action Representations
+
+### Joint-space
+
+| Column | Shape | Formula |
+|---|---|---|
+| `action.delta` | `[16]` | `action[t] − action[t−1]` (t=0: vs state joints) |
+| `action.relative` | `[16]` | `action[t] − state[t]` for joint dims 0–13 |
+
+Use `--no-joint-repr` to skip these.
+
+### EE-space
+
+Action EE columns (`action.ee_left`, `action.ee_right`) are **always** computed from the action joints. Their delta/relative columns follow the orientation math described above.
+
+| Column | Shape | Reference | Orientation |
+|---|---|---|---|
+| `action.ee_left.delta` | `[8]` | Previous action EE (t=0: vs obs EE) | R_rel = R_prev⁻¹ · R_cur → unit quat |
+| `action.ee_left.delta.rotvec` | `[7]` | Same | R_rel as rotation vector |
+| `action.ee_left.relative` | `[8]` | Current obs EE at same timestep | R_rel = R_obs⁻¹ · R_action → unit quat |
+| `action.ee_left.relative.rotvec` | `[7]` | Same | R_rel as rotation vector |
+
+Right arm mirrors left. With `--rot-repr quat` only `[8]` columns are written; with `--rot-repr rotvec` only `[7]` columns are written (under the base name, no `.rotvec` suffix); with `--rot-repr both` (default) both sets are written.
+
+### Relative vs Delta — which to use?
+
+| Property | `*.relative` | `*.delta` |
+|---|---|---|
+| Reference point | Current **state** (or obs EE) at every timestep | **Previous action** (sequential) |
+| Error accumulation | None — each value is independently anchored | Compounds — summing all prior deltas needed to recover absolute target |
+| UMI / pi0 recommendation | **Preferred** | Explicitly discouraged by UMI |
+
+**Use `action.relative`** (or `action.ee_*.relative`) when training or fine-tuning policies that follow the pi0 / LeRobot convention.
+
+---
+
 ## Dependencies
 
 ```bash
@@ -200,7 +285,7 @@ pip install numpy scipy tqdm placo
 # pip install 'lerobot[kinematics]'
 ```
 
-The script auto-sets `ROS_PACKAGE_PATH=/home/edgeai/trossen_arm_ros` so placo can resolve `package://trossen_arm_description/…` mesh paths during URDF parsing. If your workspace lives elsewhere, edit `_TROSSEN_WORKSPACE` at the top of `joint-to-ee.py`, or set `ROS_PACKAGE_PATH` in your shell.
+The script auto-sets `ROS_PACKAGE_PATH=/home/edgeai/trossen_arm_ros` so placo can resolve `package://trossen_arm_description/…` mesh paths during URDF parsing. If your workspace lives elsewhere, edit `_TROSSEN_WORKSPACE` at the top of `joint_to_ee.py`, or set `ROS_PACKAGE_PATH` in your shell.
 
 ---
 
@@ -221,141 +306,125 @@ Each gripper pose is expressed in its own arm-local frame."]
 
 ---
 
-## Action Representations
-
-In addition to EE poses, the script computes **action representation columns** that express the action signal in forms better suited for policy training. These align with the representations described in the [LeRobot action representations guide](https://huggingface.co/docs/lerobot/action_representations).
-
-### Overview
-
-| Column | Shape | Formula | Written when |
-|---|---|---|---|
-| `action.delta` | `[16]` | `action[t] − action[t−1]` (t=0: vs state joints) | Always |
-| `action.relative` | `[16]` | `action[t] − state[t]` for joint dims 0–13; velocity dims 14–15 kept as-is | Always |
-| `action.ee_left.delta` | `[8]` | `action_ee_left[t] − action_ee_left[t−1]` (t=0: vs obs EE) | `--include-action` |
-| `action.ee_right.delta` | `[8]` | `action_ee_right[t] − action_ee_right[t−1]` (t=0: vs obs EE) | `--include-action` |
-| `action.ee_left.relative` | `[8]` | `action_ee_left[t] − observation.ee_left[t]` | `--include-action` |
-| `action.ee_right.relative` | `[8]` | `action_ee_right[t] − observation.ee_right[t]` | `--include-action` |
-
-All representations are float32 and share the same dimension as their source column.
-
----
-
-### Relative vs Delta — which to use?
-
-LeRobot's documentation (and pi0/pi0.5 practice) draws a clear distinction:
-
-| Property | `action.relative` / `action.ee_*.relative` | `action.delta` / `action.ee_*.delta` |
-|---|---|---|
-| Reference point | Current **state** (or obs EE) at every timestep | **Previous action** (sequential) |
-| Error accumulation | None — each value is independently anchored to the current observation | Compounds — recovering the absolute target requires summing all prior deltas |
-| Centering | Centered around zero (small offsets dominate) → stable normalization | Centered around zero only for slow motion |
-| UMI / pi0 recommendation | **Preferred** | Explicitly discouraged by UMI |
-
-**Use `action.relative`** (or `action.ee_*.relative`) when training or fine-tuning policies that follow the pi0 / LeRobot convention. Use `action.delta` only if your downstream framework explicitly requires sequential differences.
-
----
-
-### Quaternion note
-
-Position deltas and relatives are Euclidean differences and geometrically exact. **Orientation** deltas and relatives are computed by naive vector subtraction over the quaternion components `[qw, qx, qy, qz]`. This is a valid linear approximation for small rotations but is not geometrically proper (the result is not a unit quaternion). For large orientation changes consider computing orientation differences as rotation-matrix products or log-map vectors instead.
-
----
-
-### Controlling which representations are computed
-
-By default both joint-space and EE representations are computed. Use the wizard UI or CLI flags to opt out of either:
-
-```bash
-# Skip joint-space delta/relative (action.delta, action.relative)
-python joint-to-ee.py --dataset /path/to/dataset --no-joint-repr
-
-# Skip EE action + its delta/relative (action.ee_left/right.*)
-# (just omit --include-action, which is already the default)
-python joint-to-ee.py --dataset /path/to/dataset  # no --include-action
-
-# Full output (all representations + EE action)
-python joint-to-ee.py --dataset /path/to/dataset --include-action
-```
-
-In `dataset-wizard.py` / the web wizard:
-
-```yaml
-# config.yaml
-joint_to_ee:
-  ee_frame: robot_base
-  include_joint_repr: true   # action.delta + action.relative
-  include_action: true       # action.ee_left/right + their delta/relative
-```
-
----
-
 ## Running the Conversion
 
 ### Via `dataset-wizard.py` (recommended)
 
+The wizard's EE conversion stage calls `joint_to_ee` internally. Configure it with:
+
 ```yaml
 # config.yaml
-ee_frame: robot_base       # or arm
-ee_include_action: false
-start_from: ee_conversion
-stop_at: ee_conversion
+joint_to_ee:
+  enabled: true
+  ee_frame: robot_base       # or: arm
+  rot_repr: both             # quat | rotvec | both
+  include_joint_repr: true   # include action.delta / action.relative
 ```
 
 ```bash
 python dataset-wizard.py
 # or override the frame from the CLI:
-python dataset-wizard.py --start-from ee_conversion --stop-at ee_conversion --ee-frame robot_base
+python dataset-wizard.py --start-from ee_conversion --stop-at ee_conversion
 ```
 
-### Standalone
+### Standalone (run from `tools/` directory)
 
 ```bash
-# Default: arms-first layout, robot_base frame, in-place
-python joint-to-ee.py --dataset /path/to/dataset
+# From repo root:
+cd tools
+
+# Default: robot_base frame, rot_repr=both, in-place
+python -m joint_to_ee --dataset /path/to/dataset --frame robot_base
 
 # Use arm-local frame
-python joint-to-ee.py --dataset /path/to/dataset --frame arm
+python -m joint_to_ee --dataset /path/to/dataset --frame arm
 
-# Also convert action joints
-python joint-to-ee.py --dataset /path/to/dataset --include-action
+# Only quaternion delta/relative columns (no rotvec)
+python -m joint_to_ee --dataset /path/to/dataset --frame robot_base --rot-repr quat
+
+# Only rotvec delta/relative columns
+python -m joint_to_ee --dataset /path/to/dataset --frame robot_base --rot-repr rotvec
+
+# Skip joint-space delta/relative (action.delta, action.relative)
+python -m joint_to_ee --dataset /path/to/dataset --frame robot_base --no-joint-repr
 
 # Write to a new directory instead of modifying in-place
-python joint-to-ee.py --dataset /path/to/dataset --output /path/to/new-dataset
-
-# Use the legacy name-based layout (only if you trust the dataset's feature names)
-python joint-to-ee.py --dataset /path/to/dataset --joint-layout names
+python -m joint_to_ee --dataset /path/to/dataset --frame robot_base --output /path/to/new-dataset
 ```
 
-The script uses the LeRobot dataset API (`add_features`) internally: it writes a new dataset to a temporary directory, then swaps it with the original. This guarantees the source dataset is never partially written.
+Available flags:
 
-On start-up the script prints which column indices it resolved — confirm these match your dataset before letting it run:
+| Flag | Values | Default | Description |
+|---|---|---|---|
+| `--frame` | `arm`, `robot_base` | required | EE reference frame |
+| `--rot-repr` | `quat`, `rotvec`, `both` | `both` | Which orientation representation(s) to write |
+| `--no-joint-repr` | — | off | Skip joint-space `action.delta` / `action.relative` |
+| `--output` | path | in-place | Write to a new directory instead of modifying the dataset |
+
+The script uses the LeRobot dataset API (`add_features`) internally: it writes to a temporary directory, then swaps it with the original. The source dataset is never partially written.
+
+On start-up the script prints which column indices it resolved — confirm these match your dataset:
 
 ```
-joint layout: arms-first
-  obs  left  → state[[0, 1, 2, 3, 4, 5]]
-  obs  right → state[[7, 8, 9, 10, 11, 12]]
+joint layout: arms-first (fixed)
+  obs  left  → state[[0, 1, 2, 3, 4, 5]]  gripper → state[6]
+  obs  right → state[[7, 8, 9, 10, 11, 12]]  gripper → state[13]
 building placo kinematics from wxai_follower.urdf …
-Computing EE poses (frame='robot_base', include_action=False) …
+Computing EE poses (frame='robot_base', rot_repr='both') …
 ```
 
 ---
 
 ## Verifying the Output
 
+```bash
+# Run and check output
+cd tools
+python -m joint_to_ee --dataset /path/to/dataset --frame robot_base
+```
+
+Expected columns in `meta/info.json` features (with `rot_repr=both`):
+
+```
+observation.ee_left             shape: [8]
+observation.ee_right            shape: [8]
+action.ee_left                  shape: [8]
+action.ee_right                 shape: [8]
+action.ee_left.delta            shape: [8]
+action.ee_left.delta.rotvec     shape: [7]
+action.ee_left.relative         shape: [8]
+action.ee_left.relative.rotvec  shape: [7]
+action.ee_right.delta           shape: [8]
+action.ee_right.delta.rotvec    shape: [7]
+action.ee_right.relative        shape: [8]
+action.ee_right.relative.rotvec shape: [7]
+action.delta                    shape: [16]
+action.relative                 shape: [16]
+```
+
+To verify EE values visually, use the viewer's FK Validation mode:
+
+```bash
+python tools/server.py
+open http://localhost:8080/viewer
+```
+
+In the viewer, switch to **FK Val** mode. Observation EE poses (blue/red spheres) are overlaid with live URDF FK (cyan/orange). Per-frame error is shown in the footer; episode RMS/max in `#fkStats` above.
+
+You can also verify from Python:
+
 ```python
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 dataset = LeRobotDataset(repo_id="my-merged-dataset", root="/path/to/dataset")
 
-print(dataset.meta.features.keys())
-# Should include 'observation.ee_left', 'observation.ee_right'
+print(list(dataset.meta.features.keys()))
+# Should include 'observation.ee_left', 'observation.ee_right', ...
 
 frame = dataset[0]
-print(frame["observation.ee_left"])   # tensor (7,): [x, y, z, qw, qx, qy, qz]
+print(frame["observation.ee_left"])   # tensor (8,): [x, y, z, qw, qx, qy, qz, gripper]
 print(frame["observation.ee_right"])
 ```
-
-Check `meta/info.json` — both new features appear under `"features"` with `"shape": [7]` and a description noting the chosen frame and the placo-based FK source.
 
 ---
 
