@@ -62,8 +62,8 @@ def parse_args():
                    help="Override stop stage from config file")
     p.add_argument("--ee-frame",   choices=["arm", "robot_base"], default=None,
                    help="EE reference frame (overrides config ee_frame)")
-    p.add_argument("--ee-include-action", action="store_true", default=None,
-                   help="Also compute EE and representations for action joints")
+    p.add_argument("--ee-rot-repr", choices=["quat", "rotvec", "both"], default=None,
+                   help="EE orientation representation for delta/relative (default: both)")
     p.add_argument("--no-ee-joint-repr", action="store_true", default=False,
                    help="Skip joint-space action representations (action.delta, action.relative)")
     p.add_argument("--skip-ee", action="store_true", default=False,
@@ -185,14 +185,10 @@ else:
 # ── Stage 3: EE Conversion ────────────────────────────────────────────────────
 
 if should_run("ee_conversion"):
-    ee_cfg              = cfg.get("joint_to_ee", {})
-    ref_frame           = args.ee_frame or ee_cfg.get("ee_frame") or cfg.get("ee_frame")
-    include_action      = (
-        args.ee_include_action
-        or ee_cfg.get("include_action", False)
-        or cfg.get("ee_include_action", False)
-    )
-    include_joint_repr  = (
+    ee_cfg = cfg.get("joint_to_ee", {})
+    ref_frame = args.ee_frame or ee_cfg.get("ee_frame") or cfg.get("ee_frame")
+    rot_repr = args.ee_rot_repr or ee_cfg.get("rot_repr", "both")
+    include_joint_repr = (
         not args.no_ee_joint_repr
         and ee_cfg.get("include_joint_repr", True)
     )
@@ -212,8 +208,8 @@ if should_run("ee_conversion"):
                 dataset_root=output_directory,
                 output_root=output_directory,   # in-place
                 ref_frame=ref_frame,
-                include_action=include_action,
                 include_joint_repr=include_joint_repr,
+                rot_repr=rot_repr,
             )
         except ValueError as exc:
             console.print(Panel(
@@ -226,10 +222,7 @@ if should_run("ee_conversion"):
                 title="[bold red]EE Conversion Failed — Features Already Exist[/]",
                 border_style="red",
             ))
-            if Confirm.ask(
-                "Skip EE conversion and continue to the next stage?",
-                default=False,
-            ):
+            if Confirm.ask("Skip EE conversion and continue to the next stage?", default=False):
                 console.print("[dim]EE conversion skipped — continuing.[/]")
             else:
                 console.print("[red]Aborting.[/]")

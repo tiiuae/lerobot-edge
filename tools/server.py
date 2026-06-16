@@ -313,7 +313,7 @@ class Handler(BaseHTTPRequestHandler):
                 if data.get("start_from"):        cmd += ["--start-from", data["start_from"]]
                 if data.get("stop_at"):           cmd += ["--stop-at",    data["stop_at"]]
                 if data.get("ee_frame"):          cmd += ["--ee-frame",   data["ee_frame"]]
-                if data.get("ee_include_action"): cmd += ["--ee-include-action"]
+                if data.get("ee_rot_repr"):    cmd += ["--ee-rot-repr", data["ee_rot_repr"]]
                 if data.get("ee_joint_repr") is False:
                     cmd += ["--no-ee-joint-repr"]
                 if data.get("skip_ee"):
