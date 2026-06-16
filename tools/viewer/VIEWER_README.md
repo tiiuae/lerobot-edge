@@ -1,91 +1,173 @@
-# Robot Dataset Viewer — Code Documentation
+# Robot Dataset Viewer — Documentation
 
 ## Overview
 
-A browser-based 3-D visualiser that replays LeRobot datasets on top of the
-physical robot model. It renders two side-by-side Three.js panels, each
-containing a fully loaded URDF robot, and drives their joint angles
-frame-by-frame from the recorded data.
+A browser-based 3-D visualiser that replays LeRobot datasets on the physical
+robot model. It renders two side-by-side Three.js panels and drives them
+frame-by-frame from recorded data.
 
 ---
 
-## Architecture
+## Starting the Server
 
-```
-browser
-  └─ index.html          HTML shell + importmap (CDN Three.js, local urdf-loader)
-  └─ main.js             All application logic (ES module)
-  └─ style.css           Dark/light theme, layout
+```bash
+# From the lerobot/ root:
+python tools/server.py
 
-server
-  └─ server.py           Python stdlib HTTP server
-       ├─ /              serves index.html
-       ├─ /main.js       serves main.js
-       ├─ /robot.urdf    serves the URDF from the Trossen arm description package
-       ├─ /lib/          serves urdf-loader (URDFLoader.js + URDFClasses.js)
-       ├─ /pkg/          serves mesh files (STL / DAE) from the ROS package path
-       └─ /api/          JSON endpoints (datasets, episodes, frames)
+# With a custom dataset cache directory:
+python tools/server.py --cache /path/to/datasets
+
+# Then open:
+http://localhost:8080/viewer
 ```
 
 ---
 
-## The Two Panels and What Drives Each
+## Two-Panel Layout
 
 ### LEFT panel — "Joint Space"
 
-| Item | Detail |
-|------|--------|
-| What is rendered | Full URDF robot model |
-| What drives it | `observation.state` column from the parquet files |
-| Data shape | Array of floats — one value per joint |
-| Update rate | Every frame (50 fps real-time, adjustable via speed selector) |
+Renders the full URDF robot and drives its joint angles from dataset data.
 
-The joint values in `observation.state` are mapped to URDF joint names through
-`JOINT_MAP` and `GRIPPER_MAP` (see below).  The Three.js camera on this panel
-can be orbited freely; it also syncs with the right panel.
+A **State / Action** toggle controls which column is used to drive the URDF:
 
-### RIGHT panel — "End-Effector Space"
+| Toggle position | Source column | Typical use |
+|---|---|---|
+| **State** (default) | `observation.state` | Replay what the robot actually did |
+| **Action** | `action` | Replay the commanded joint targets |
 
-| Item | Detail |
-|------|--------|
-| What is rendered | Full URDF robot model (independent clone) **+** EE overlays |
-| What drives the robot | Same `observation.state` joints as the left panel |
-| What drives the EE overlays | `observation.ee_left` and `observation.ee_right` columns |
-| EE data shape | Array of 7 floats: `[x, y, z, qw, qx, qy, qz]` in the robot base frame |
+Joint values are mapped to URDF joint names through `JOINT_MAP` and
+`GRIPPER_MAP` (defined in `js/constants.js`). The camera can be orbited freely;
+it syncs with the right panel — the left canvas is **primary** by default
+(dragging either canvas syncs both).
 
-EE overlays (only shown when the dataset contains those columns):
+### RIGHT panel — "EE Analysis"
 
-| Overlay | Colour | What it shows |
-|---------|--------|---------------|
-| Sphere | Blue | Left EE position at the current frame |
-| Axis arrows (3×) | Blue shades | Left EE orientation at the current frame |
-| Line | Blue (semi-transparent) | Full left EE trajectory across all frames |
-| Sphere | Red | Right EE position at the current frame |
-| Axis arrows (3×) | Red shades | Right EE orientation at the current frame |
-| Line | Red (semi-transparent) | Full right EE trajectory across all frames |
-| Two grey spheres | Grey | Fixed arm mount points on the mobile base (reference only) |
+Renders the same URDF robot plus end-effector overlays. The **mode selector**
+above the canvas switches between four analysis modes:
+
+#### FK Val (FK Validation)
+
+Compares recorded EE poses against live forward-kinematics computed from the
+URDF:
+
+| Element | Colour | What it shows |
+|---|---|---|
+| Sphere + axis frame | Blue / Red | Baseline: `observation.ee_left` / `observation.ee_right` |
+| Sphere + axis frame | Cyan / Orange | Candidate: live URDF FK result |
+| Line between spheres | Yellow | FK position error vector |
+
+Per-frame error is shown in the footer: `FK err L: X.X mm / X.X°`
+
+Episode RMS and max statistics are displayed in the `#fkStats` bar above the
+canvas. An error-vs-time chart is rendered below the canvas.
+
+#### Obs vs Action
+
+Compares observed and commanded EE poses:
+
+| Element | Colour | What it shows |
+|---|---|---|
+| Sphere + axis frame | Blue / Red | `observation.ee_left` / `observation.ee_right` |
+| Sphere + axis frame | Cyan / Orange | `action.ee_left` / `action.ee_right` |
+| Line between spheres | Yellow | Tracking gap vector |
+
+#### EE Delta
+
+Shows the delta direction relative to the observed EE pose:
+
+| Element | Colour | What it shows |
+|---|---|---|
+| Sphere + axis frame | Blue / Red | `observation.ee_left` / `observation.ee_right` |
+| Arrow | Green | `action.ee.delta` direction |
+
+#### EE Rel
+
+Shows the relative EE vector from the observed pose:
+
+| Element | Colour | What it shows |
+|---|---|---|
+| Sphere + axis frame | Blue / Red | `observation.ee_left` / `observation.ee_right` |
+| Arrow | Purple | `action.ee.relative` vector |
+
+---
+
+## EE Vector Format
+
+EE columns contain **8-dim** vectors: `[x, y, z, qw, qx, qy, qz, gripper]`
+
+The viewer also reads legacy **7-dim** datasets `[x, y, z, qw, qx, qy, qz]`
+(gripper dimension simply absent).
+
+Axis labels are resolved per-dataset by `labels.js:eeLabels(key, len)` which
+handles 7-dim, 8-dim, and `.rotvec`-suffixed columns.
+
+---
+
+## Panels and Overlays
+
+| Button | ID | Panel / Modal |
+|---|---|---|
+| **Values** | `#dataBtn` | Values inspector — raw per-frame data for every column |
+| **Graphs** | `#graphBtn` | Chart.js time-series graphs for state/action/EE signals |
+| **Calibration** | `#calibBtn` | Joint calibration panel (per-joint offset and sign) |
+| **Help** | `#helpBtn` | Help modal with keyboard shortcuts and usage notes |
+
+---
+
+## Camera Sync
+
+Both canvases share camera state. Dragging either canvas syncs both.
+
+The **left canvas is primary** by default. Each animation frame:
+
+1. Primary `OrbitControls.update()` applies user input.
+2. `syncCameras()` copies position, quaternion, and orbit target to the secondary.
+3. Secondary `OrbitControls.update()` settles at the synced position.
+
+This prevents the two `OrbitControls` instances from fighting each other.
+
+---
+
+## Module Structure
+
+Source lives under `tools/viewer/js/` as native ES modules (no bundler).
+
+| Module | Responsibility |
+|---|---|
+| `constants.js` | `JOINT_MAP`, `GRIPPER_MAP`, `STATE_IDX`, mount offsets, colour palette |
+| `state.js` | Shared mutable singleton `S` (frames, modes, feature flags, names) |
+| `labels.js` | `eeLabels(key, len)` — 7/8-dim + `.rotvec`-aware axis labels |
+| `scene.js` | Three.js renderers, scenes, cameras, lights, floor, render loop, helpers |
+| `robot.js` | URDF loading, joint application, FK helpers, `getEEWorldPose` |
+| `overlays.js` | Markers, trails, arrows, `worldPos`, `updateEE`, trajectory builders |
+| `validation.js` | Per-frame FK error (mm/deg), episode RMS/max stats, error chart |
+| `modes.js` | Mode switching, legend, button availability, `setupModeButtons` |
+| `calibration.js` | Joint calibration panel (offset, sign per joint) |
+| `datapanel.js` | Values inspector panel (`buildDataPanelSections`, `updateDataPanel`) |
+| `graphs.js` | Chart.js time-series graphs panel |
+| `playback.js` | Frame playback (play/pause/tick/slider), `updateFrame`, `setStatus` |
+| `api.js` | Dataset/episode fetch (`loadDatasets`, `onDatasetChange`, `loadEpisode`) |
 
 ---
 
 ## Joint Mapping
 
-Dataset state names → URDF joint names are resolved in two places.
-
 ### Revolute (arm) joints — `JOINT_MAP`
 
 ```
-left_joint_0  →  follower_left_joint_0   (base rotation, axis Z)
-left_joint_1  →  follower_left_joint_1   (shoulder pitch,  axis +Y)
-left_joint_2  →  follower_left_joint_2   (upper arm,       axis −Y)
-left_joint_3  →  follower_left_joint_3   (forearm,         axis −Y)
-left_joint_4  →  follower_left_joint_4   (wrist rotation,  axis −Z)
-left_joint_5  →  follower_left_joint_5   (wrist roll,      axis +X)
-right_joint_0 …5  →  follower_right_joint_0 …5   (mirror of left)
+left_joint_0  →  follower_left_joint_0   (base rotation,  axis Z)
+left_joint_1  →  follower_left_joint_1   (shoulder pitch, axis +Y)
+left_joint_2  →  follower_left_joint_2   (upper arm,      axis -Y)
+left_joint_3  →  follower_left_joint_3   (forearm,        axis -Y)
+left_joint_4  →  follower_left_joint_4   (wrist rotation, axis -Z)
+left_joint_5  →  follower_left_joint_5   (wrist roll,     axis +X)
+right_joint_0 … 5  →  follower_right_joint_0 … 5  (mirror of left)
 ```
 
 ### Prismatic (gripper) joints — `GRIPPER_MAP`
 
-A single gripper value controls two prismatic carriages that open/close:
+A single gripper value controls two prismatic carriages:
 
 ```
 left_joint_6  →  follower_left_right_carriage_joint
@@ -96,120 +178,25 @@ right_joint_6 →  follower_right_right_carriage_joint
 
 ### Fallback indices — `STATE_IDX`
 
-When `observation.state` does not include named features in the dataset's
-`meta/info.json`, the code falls back to fixed positions in the state array:
+When `observation.state` does not carry named features in the dataset's
+`meta/info.json`, the viewer falls back to fixed positions:
 
 ```
-index 0–4   odom_x, odom_y, odom_theta, linear_vel, angular_vel
-index 5–10  left_joint_0 … left_joint_5
-index 11    left_joint_6  (gripper)
-index 12–17 right_joint_0 … right_joint_5
-index 18    right_joint_6 (gripper)
+index 0–5    left_joint_0 … left_joint_5
+index 6      left_joint_6  (gripper)
+index 7–12   right_joint_0 … right_joint_5
+index 13     right_joint_6 (gripper)
 ```
-
----
-
-## Coordinate System
-
-Everything lives in native **ROS Z-up** space:
-
-- **X** = forward (robot's heading direction)
-- **Y** = left
-- **Z** = up
-
-`camera.up = (0, 0, 1)` tells OrbitControls that Z is the vertical axis so
-orbiting and panning behave naturally.
-
-No global rotation is applied to the robot root — the URDF kinematic chain is
-used directly in Z-up.
-
-### Why the base mesh has `rpy="-π/2 0 0"` in the URDF
-
-The mobile base mesh (`meshes/mobile_ai/base_link.dae`) is a Collada (DAE)
-file.  Collada files exported from common CAD tools embed a Y-up → Z-up
-rotation inside the file.  ColladaLoader (Three.js) detects this and applies
-a −π/2 rotation to the scene node.  URDFLoader then immediately resets any
-loaded mesh's quaternion to identity, so the auto-rotation is undone.  The
-URDF `<visual><origin rpy="-1.57…">` re-applies exactly the −π/2 that is
-needed to display the mesh correctly in Z-up, so the net result is one clean
-−π/2 correction — not zero and not double.
-
-The arm link meshes (`meshes/wxai/link_N.stl`) are plain STL files with no
-embedded coordinate metadata.  They are authored in Z-up orientation and need
-no visual-origin rotation, hence `rpy="0 0 0"` for all of them.
-
----
-
-## Data Flow (per frame)
-
-```
-Parquet files
-  │
-  └─ /api/frames (server.py)
-        │  returns JSON: { frames: [ {observation.state, observation.ee_left,
-        │                             observation.ee_right, timestamp, …}, … ] }
-        ▼
-  loadEpisode() in main.js
-        │  stores frames[], resets slider
-        ▼
-  updateFrame(idx)
-        ├─ applyJoints(frame)
-        │     buildStateByName()   maps array → { left_joint_0: val, … }
-        │     robot.setJointValue(urdfName, val)   ← left panel URDF
-        │     robotEE.setJointValue(urdfName, val) ← right panel URDF
-        │
-        └─ updateEE(frame)
-              applyPose(eeLeftFrame,  ee_left[7])   position + quaternion
-              applyPose(eeRightFrame, ee_right[7])
-              eeLeftMark.position  ←  ee_left[0:3]
-              eeRightMark.position ←  ee_right[0:3]
-```
-
----
-
-## URDF Loading
-
-Two independent robot instances are loaded (one per panel) via `loadRobot()`.
-Both are loaded in parallel with `Promise.all([loadOne(), loadOne()])` because
-Three.js objects cannot be shared between two independent scene graphs.
-
-```
-makeURDFLoader()
-  loader.packages = { trossen_arm_description: '/pkg/trossen_arm_description' }
-  loader.loadMeshCb   ← custom handler for .dae files:
-      1. ColladaLoader loads the file (applies Z-up auto-rotation internally)
-      2. dae.scene.rotation.set(0,0,0)  — undo the auto-rotation
-         (URDFLoader also does obj.quaternion.identity(), so this is redundant
-          but makes the intent explicit)
-      3. pass dae.scene to done()
-      For .stl files the default loader is used (no rotation applied)
-```
-
----
-
-## Camera Sync
-
-Both panels share camera state.  Whichever panel receives the last
-`pointerdown` event becomes the **primary**.  Each animation frame:
-
-1. Primary `OrbitControls.update()` is called first (applies user input).
-2. `syncCameras()` copies position, quaternion, and orbit target from the
-   primary camera to the secondary.
-3. Secondary `OrbitControls.update()` is called (no pending input → stays at
-   the synced position, with damping settling toward it).
-
-This keeps both views locked together without the two OrbitControls fighting
-each other.
 
 ---
 
 ## Server API
 
 | Endpoint | Query params | Returns |
-|----------|-------------|---------|
-| `GET /api/datasets` | — | Array of dataset descriptors found under the cache dir |
-| `GET /api/episodes` | `dataset=<path>` | Array of `{episode, frames}` objects |
-| `GET /api/frames` | `dataset=<path>&episode=<idx>` | `{frames: […], count: N}` |
+|---|---|---|
+| `GET /api/datasets` | — | Array of dataset descriptors |
+| `GET /api/episodes` | `dataset=<path>` | `[{episode, frames}]` |
+| `GET /api/frames` | `dataset=<path>&episode=<n>` | `{frames: […]}` |
 
 Dataset descriptor fields:
 
@@ -221,39 +208,57 @@ Dataset descriptor fields:
   "total_frames": 8400,
   "has_ee_left": true,
   "has_ee_right": true,
-  "state_names": ["odom_x", …, "left_joint_0", …],
-  "action_names": ["left_joint_0", …]
+  "has_action_ee": true,
+  "has_ee_delta": false,
+  "has_ee_relative": false,
+  "state_names": ["left_joint_0", "…"],
+  "action_names": ["left_joint_0", "…"]
 }
 ```
 
-`has_ee_left` / `has_ee_right` control whether EE overlays are shown in the
-right panel.  Datasets that lack EE columns still render correctly — only the
-joint-space animation is active.
+`/api/frames` returns all EE columns present in the dataset:
 
----
-
-## File Reference
-
-| File | Purpose |
-|------|---------|
-| `server.py` | Python HTTP server; serves static files + API |
-| `index.html` | HTML shell; importmap; help modal markup |
-| `main.js` | All Three.js/URDF/playback logic |
-| `style.css` | Layout, dark theme variables, modal styles |
-| `lib/URDFLoader.js` | urdf-loader v0.12 (local copy, avoids CORS) |
-| `lib/URDFClasses.js` | URDFRobot, URDFJoint, URDFLink class definitions |
-
----
-
-## Running
-
-```bash
-# From the lerobot/ root or viewer/ directory:
-python viewer/server.py [--port 8080] [--cache ~/.cache/huggingface/lerobot]
-
-# Then open:
-http://localhost:8080
+```
+observation.state, action,
+observation.ee_left, observation.ee_right,
+action.ee_left, action.ee_right,
+action.ee_left.delta, action.ee_right.delta,
+action.ee_left.relative, action.ee_right.relative
 ```
 
-The `--cache` flag points to the directory that contains your downloaded
-LeRobot datasets (each must have a `meta/info.json` file to be listed).
+---
+
+## Coordinate System
+
+Everything lives in **ROS Z-up** space:
+
+- **X** = forward
+- **Y** = left
+- **Z** = up
+
+`camera.up = (0, 0, 1)` is set so `OrbitControls` orbits naturally around the
+vertical Z axis. No global rotation is applied to the robot root.
+
+### Why the base mesh has `rpy="-π/2 0 0"` in the URDF
+
+The mobile base mesh (`base_link.dae`) is a Collada file. `ColladaLoader`
+auto-applies a Y-up→Z-up rotation; `URDFLoader` then resets it to identity.
+The URDF `<visual><origin rpy="-1.57…">` re-applies exactly the one -π/2
+needed — net result is a single clean correction.
+
+Arm link meshes (`link_N.stl`) are plain STL files authored in Z-up and
+need no visual-origin rotation.
+
+---
+
+## Static File Layout
+
+```
+viewer/
+  index.html        HTML shell, importmap (CDN Three.js, local urdf-loader)
+  style.css         Dark/light theme, layout
+  js/               ES modules (see module table above)
+  lib/
+    URDFLoader.js   urdf-loader v0.12 (local copy, avoids CORS)
+    URDFClasses.js  URDFRobot, URDFJoint, URDFLink class definitions
+```
