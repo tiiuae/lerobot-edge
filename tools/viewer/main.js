@@ -19,30 +19,8 @@ import * as THREE        from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { ColladaLoader }  from 'three/examples/jsm/loaders/ColladaLoader.js';
 import URDFLoader         from 'urdf-loader';
-
-// ── Global playback state ─────────────────────────────────────────────────────
-let frames   = [];
-let frameIdx = 0;
-let playing  = false;
-let playTimer = null;
-
-// ── Mode state ────────────────────────────────────────────────────────────────
-let leftMode  = 'state';       // 'state' | 'action'
-let rightMode = 'fk';          // 'fk' | 'obs_action' | 'ee_delta' | 'ee_relative'
-
-// ── Per-dataset feature flags ─────────────────────────────────────────────────
-let hasEELeft    = false;
-let hasEERight   = false;
-let hasActionEE  = false;   // action.ee_left/right columns present
-let hasEEDelta   = false;   // action.ee_left.delta columns present
-let hasEERel     = false;   // action.ee_left.relative columns present
-
-// ── Dataset column names (from meta/info.json) ────────────────────────────────
-let stateNames  = [];
-let actionNames = [];
-
-// ── Data inspector: key → array of value <span> elements ─────────────────────
-let dataValMap = {};
+import * as K from './js/constants.js';
+import { S }  from './js/state.js';
 
 // ── Coordinate-frame correction ───────────────────────────────────────────────
 // The URDF root is base_footprint. URDF-loader places it at scene origin, so
@@ -60,26 +38,6 @@ function worldPos(arr) {
     arr[2] + baseLinkOffset.z,
   );
 }
-
-// ── Joint name mapping: dataset state name → URDF joint name ──────────────────
-const JOINT_MAP = {
-  left_joint_0:  'follower_left_joint_0',
-  left_joint_1:  'follower_left_joint_1',
-  left_joint_2:  'follower_left_joint_2',
-  left_joint_3:  'follower_left_joint_3',
-  left_joint_4:  'follower_left_joint_4',
-  left_joint_5:  'follower_left_joint_5',
-  right_joint_0: 'follower_right_joint_0',
-  right_joint_1: 'follower_right_joint_1',
-  right_joint_2: 'follower_right_joint_2',
-  right_joint_3: 'follower_right_joint_3',
-  right_joint_4: 'follower_right_joint_4',
-  right_joint_5: 'follower_right_joint_5',
-};
-const GRIPPER_MAP = {
-  left_joint_6:  ['follower_left_right_carriage_joint',  'follower_left_left_carriage_joint'],
-  right_joint_6: ['follower_right_right_carriage_joint', 'follower_right_left_carriage_joint'],
-};
 
 // ── Joint calibration ─────────────────────────────────────────────────────────
 const CALIB_KEY = 'lerobot-viewer-joint-calibration-v3';
@@ -110,34 +68,6 @@ function transformJointValue(dsName, raw) {
   return c ? c.sign * raw + c.offset : raw;
 }
 
-// Arms-first layout — metadata names are mislabeled, use fixed indices instead.
-//   state/action [0..6]  = left  arm joints 0..6  (joint_6 = gripper)
-//   state/action [7..13] = right arm joints 0..6
-//   state  [14..18]      = base info
-//   action [14..15]      = linear_vel, angular_vel
-const STATE_IDX = {
-  left_joint_0: 0,  left_joint_1: 1,  left_joint_2: 2,  left_joint_3: 3,
-  left_joint_4: 4,  left_joint_5: 5,  left_joint_6: 6,
-  right_joint_0: 7, right_joint_1: 8, right_joint_2: 9, right_joint_3: 10,
-  right_joint_4: 11, right_joint_5: 12, right_joint_6: 13,
-};
-
-const LEFT_MOUNT  = [0.331,  0.3, 0.831];
-const RIGHT_MOUNT = [0.331, -0.3, 0.831];
-
-// ── Colour palette ────────────────────────────────────────────────────────────
-const BG     = 0xf0f2f5;
-const GRID1  = 0x999999;
-const GRID2  = 0xcccccc;
-
-const C_OBS_L   = 0x2266cc;   // observation EE left  — blue
-const C_OBS_R   = 0xcc2211;   // observation EE right — red
-const C_SEC_L   = 0x00bbdd;   // secondary left  (FK / action EE) — cyan
-const C_SEC_R   = 0xdd7700;   // secondary right (FK / action EE) — orange
-const C_ERR     = 0xffdd00;   // error / gap line  — yellow
-const C_DELTA   = 0x22cc55;   // delta arrow       — green
-const C_REL     = 0xaa44ff;   // relative arrow    — purple
-
 // ── Shared helpers ────────────────────────────────────────────────────────────
 function makeFloor(scene) {
   const floor = new THREE.Mesh(
@@ -146,7 +76,7 @@ function makeFloor(scene) {
   );
   floor.receiveShadow = true;
   scene.add(floor);
-  const grid = new THREE.GridHelper(6, 30, GRID1, GRID2);
+  const grid = new THREE.GridHelper(6, 30, K.GRID1, K.GRID2);
   grid.rotation.x = Math.PI / 2;
   scene.add(grid);
 }
@@ -266,8 +196,8 @@ function setupJointScene() {
   jRenderer.shadowMap.type    = THREE.PCFSoftShadowMap;
 
   jScene = new THREE.Scene();
-  jScene.background = new THREE.Color(BG);
-  jScene.fog = new THREE.Fog(BG, 10, 25);
+  jScene.background = new THREE.Color(K.BG);
+  jScene.fog = new THREE.Fog(K.BG, 10, 25);
 
   jRosRoot = new THREE.Group();
   jScene.add(jRosRoot);
@@ -277,8 +207,8 @@ function setupJointScene() {
   ({ cam: jCamera, ctrl: jControls } = makeCamera(canvas, [3.0, -3.5, 2.0], [0.0, 0.0, 1.0]));
 
   const sGeo = new THREE.SphereGeometry(0.016, 10, 10);
-  jObsLeftMark  = new THREE.Mesh(sGeo, new THREE.MeshPhongMaterial({ color: C_OBS_L, emissive: 0x112244 }));
-  jObsRightMark = new THREE.Mesh(sGeo, new THREE.MeshPhongMaterial({ color: C_OBS_R, emissive: 0x441108 }));
+  jObsLeftMark  = new THREE.Mesh(sGeo, new THREE.MeshPhongMaterial({ color: K.C_OBS_L, emissive: 0x112244 }));
+  jObsRightMark = new THREE.Mesh(sGeo, new THREE.MeshPhongMaterial({ color: K.C_OBS_R, emissive: 0x441108 }));
   jRosRoot.add(jObsLeftMark, jObsRightMark);
   jObsLeftMark.visible = jObsRightMark.visible = false;
 }
@@ -309,8 +239,8 @@ function setupEEScene() {
   eRenderer.shadowMap.type    = THREE.PCFSoftShadowMap;
 
   eScene = new THREE.Scene();
-  eScene.background = new THREE.Color(BG);
-  eScene.fog = new THREE.Fog(BG, 10, 25);
+  eScene.background = new THREE.Color(K.BG);
+  eScene.fog = new THREE.Fog(K.BG, 10, 25);
 
   eRosRoot = new THREE.Group();
   eScene.add(eRosRoot);
@@ -323,8 +253,8 @@ function setupEEScene() {
   const mountMat = new THREE.MeshPhongMaterial({ color: 0x334455, emissive: 0x111a22 });
   const lMount = new THREE.Mesh(mountGeo, mountMat.clone());
   const rMount = new THREE.Mesh(mountGeo, mountMat.clone());
-  lMount.position.set(...LEFT_MOUNT);
-  rMount.position.set(...RIGHT_MOUNT);
+  lMount.position.set(...K.LEFT_MOUNT);
+  rMount.position.set(...K.RIGHT_MOUNT);
   eRosRoot.add(lMount, rMount);
 
   // Observation EE — axis frames
@@ -335,28 +265,28 @@ function setupEEScene() {
 
   // Observation EE — solid spheres (primary)
   const sObs = new THREE.SphereGeometry(0.020, 12, 12);
-  eeObsLeftMark  = new THREE.Mesh(sObs, new THREE.MeshPhongMaterial({ color: C_OBS_L, emissive: 0x112244 }));
-  eeObsRightMark = new THREE.Mesh(sObs, new THREE.MeshPhongMaterial({ color: C_OBS_R, emissive: 0x441108 }));
+  eeObsLeftMark  = new THREE.Mesh(sObs, new THREE.MeshPhongMaterial({ color: K.C_OBS_L, emissive: 0x112244 }));
+  eeObsRightMark = new THREE.Mesh(sObs, new THREE.MeshPhongMaterial({ color: K.C_OBS_R, emissive: 0x441108 }));
   eRosRoot.add(eeObsLeftMark, eeObsRightMark);
   eeObsLeftMark.visible = eeObsRightMark.visible = false;
 
   // Secondary EE — smaller spheres (FK EE or action.ee depending on mode)
   const sSec = new THREE.SphereGeometry(0.014, 10, 10);
-  eeSecLeftMark  = new THREE.Mesh(sSec, new THREE.MeshPhongMaterial({ color: C_SEC_L, emissive: 0x003344 }));
-  eeSecRightMark = new THREE.Mesh(sSec, new THREE.MeshPhongMaterial({ color: C_SEC_R, emissive: 0x331100 }));
+  eeSecLeftMark  = new THREE.Mesh(sSec, new THREE.MeshPhongMaterial({ color: K.C_SEC_L, emissive: 0x003344 }));
+  eeSecRightMark = new THREE.Mesh(sSec, new THREE.MeshPhongMaterial({ color: K.C_SEC_R, emissive: 0x331100 }));
   eRosRoot.add(eeSecLeftMark, eeSecRightMark);
   eeSecLeftMark.visible = eeSecRightMark.visible = false;
 
   // Gap / error lines
-  errLeftLine  = makeUpdatableLine(C_ERR);
-  errRightLine = makeUpdatableLine(C_ERR);
+  errLeftLine  = makeUpdatableLine(K.C_ERR);
+  errRightLine = makeUpdatableLine(K.C_ERR);
   eRosRoot.add(errLeftLine, errRightLine);
 
   // Delta / Relative arrow helpers
   const fwd = new THREE.Vector3(1, 0, 0);
   const org = new THREE.Vector3(0, 0, 0);
-  arrowLeft  = new THREE.ArrowHelper(fwd, org, 0.1, C_DELTA, 0.04, 0.02);
-  arrowRight = new THREE.ArrowHelper(fwd, org, 0.1, C_DELTA, 0.04, 0.02);
+  arrowLeft  = new THREE.ArrowHelper(fwd, org, 0.1, K.C_DELTA, 0.04, 0.02);
+  arrowRight = new THREE.ArrowHelper(fwd, org, 0.1, K.C_DELTA, 0.04, 0.02);
   arrowLeft.visible = arrowRight.visible = false;
   eRosRoot.add(arrowLeft, arrowRight);
 
@@ -395,9 +325,9 @@ function buildValuesByName(data, fallbackIdxMap) {
 }
 
 function applyRobotJoints(rb, byName) {
-  for (const [dsName, urdfName] of Object.entries(JOINT_MAP))
+  for (const [dsName, urdfName] of Object.entries(K.JOINT_MAP))
     if (dsName in byName) rb.setJointValue(urdfName, transformJointValue(dsName, byName[dsName]));
-  for (const [dsName, urdfNames] of Object.entries(GRIPPER_MAP))
+  for (const [dsName, urdfNames] of Object.entries(K.GRIPPER_MAP))
     if (dsName in byName) {
       const v = transformJointValue(dsName, byName[dsName]);
       for (const u of urdfNames) rb.setJointValue(u, v);
@@ -413,9 +343,9 @@ function getEEWorldPos(robotObj, linkName) {
 // Drive the URDF from observation.state (State mode) or action (Action mode).
 function applyJoints(frame) {
   if (!robot) return;
-  const data = leftMode === 'state' ? frame['observation.state'] : frame['action'];
+  const data = S.leftMode === 'state' ? frame['observation.state'] : frame['action'];
   if (!data) return;
-  const byName = buildValuesByName(data, STATE_IDX);
+  const byName = buildValuesByName(data, K.STATE_IDX);
   applyRobotJoints(robot, byName);
 }
 
@@ -431,15 +361,15 @@ function buildObsTrajectories() {
   eeObsLeftTrail = clearTrail(eeObsLeftTrail, eRosRoot);
   eeObsRightTrail= clearTrail(eeObsRightTrail,eRosRoot);
 
-  if (hasEELeft) {
-    const pts = frames.map(f => f['observation.ee_left']).filter(Boolean).map(worldPos);
-    eeObsLeftTrail = makeLine(pts, C_OBS_L, 0.6); eRosRoot.add(eeObsLeftTrail);
-    jObsLeftTrail  = makeLine(pts, C_OBS_L, 0.6); jRosRoot.add(jObsLeftTrail);
+  if (S.hasEELeft) {
+    const pts = S.frames.map(f => f['observation.ee_left']).filter(Boolean).map(worldPos);
+    eeObsLeftTrail = makeLine(pts, K.C_OBS_L, 0.6); eRosRoot.add(eeObsLeftTrail);
+    jObsLeftTrail  = makeLine(pts, K.C_OBS_L, 0.6); jRosRoot.add(jObsLeftTrail);
   }
-  if (hasEERight) {
-    const pts = frames.map(f => f['observation.ee_right']).filter(Boolean).map(worldPos);
-    eeObsRightTrail = makeLine(pts, C_OBS_R, 0.6); eRosRoot.add(eeObsRightTrail);
-    jObsRightTrail  = makeLine(pts, C_OBS_R, 0.6); jRosRoot.add(jObsRightTrail);
+  if (S.hasEERight) {
+    const pts = S.frames.map(f => f['observation.ee_right']).filter(Boolean).map(worldPos);
+    eeObsRightTrail = makeLine(pts, K.C_OBS_R, 0.6); eRosRoot.add(eeObsRightTrail);
+    jObsRightTrail  = makeLine(pts, K.C_OBS_R, 0.6); jRosRoot.add(jObsRightTrail);
   }
 }
 
@@ -449,24 +379,24 @@ function buildFKTrajectories() {
   eeSecLeftTrail  = clearTrail(eeSecLeftTrail,  eRosRoot);
   eeSecRightTrail = clearTrail(eeSecRightTrail, eRosRoot);
 
-  if (!robot || !frames.length) return;
+  if (!robot || !S.frames.length) return;
 
   // For FK validation always use observation.state (we validate the conversion script)
   const ptsL = [], ptsR = [];
-  for (const frame of frames) {
+  for (const frame of S.frames) {
     const data = frame['observation.state'];
     if (!data) continue;
-    applyRobotJoints(robot, buildValuesByName(data, STATE_IDX));
+    applyRobotJoints(robot, buildValuesByName(data, K.STATE_IDX));
     const lPos = getEEWorldPos(robot, 'follower_left_ee_gripper_link');
     const rPos = getEEWorldPos(robot, 'follower_right_ee_gripper_link');
     if (lPos) ptsL.push(lPos.clone());
     if (rPos) ptsR.push(rPos.clone());
   }
-  if (ptsL.length) { eeSecLeftTrail  = makeLine(ptsL, C_SEC_L, 0.5); eRosRoot.add(eeSecLeftTrail); }
-  if (ptsR.length) { eeSecRightTrail = makeLine(ptsR, C_SEC_R, 0.5); eRosRoot.add(eeSecRightTrail); }
+  if (ptsL.length) { eeSecLeftTrail  = makeLine(ptsL, K.C_SEC_L, 0.5); eRosRoot.add(eeSecLeftTrail); }
+  if (ptsR.length) { eeSecRightTrail = makeLine(ptsR, K.C_SEC_R, 0.5); eRosRoot.add(eeSecRightTrail); }
 
   // Restore current frame
-  if (frames[frameIdx]) applyJoints(frames[frameIdx]);
+  if (S.frames[S.frameIdx]) applyJoints(S.frames[S.frameIdx]);
 }
 
 // Build action.ee trajectories for Obs vs Action EE mode.
@@ -474,18 +404,18 @@ function buildActionEETrajectories() {
   eeSecLeftTrail  = clearTrail(eeSecLeftTrail,  eRosRoot);
   eeSecRightTrail = clearTrail(eeSecRightTrail, eRosRoot);
 
-  if (!hasActionEE) return;
-  const ptsL = frames.map(f => f['action.ee_left'] ).filter(Boolean).map(worldPos);
-  const ptsR = frames.map(f => f['action.ee_right']).filter(Boolean).map(worldPos);
-  if (ptsL.length) { eeSecLeftTrail  = makeLine(ptsL, C_SEC_L, 0.5); eRosRoot.add(eeSecLeftTrail); }
-  if (ptsR.length) { eeSecRightTrail = makeLine(ptsR, C_SEC_R, 0.5); eRosRoot.add(eeSecRightTrail); }
+  if (!S.hasActionEE) return;
+  const ptsL = S.frames.map(f => f['action.ee_left'] ).filter(Boolean).map(worldPos);
+  const ptsR = S.frames.map(f => f['action.ee_right']).filter(Boolean).map(worldPos);
+  if (ptsL.length) { eeSecLeftTrail  = makeLine(ptsL, K.C_SEC_L, 0.5); eRosRoot.add(eeSecLeftTrail); }
+  if (ptsR.length) { eeSecRightTrail = makeLine(ptsR, K.C_SEC_R, 0.5); eRosRoot.add(eeSecRightTrail); }
 }
 
 // Rebuild secondary trajectories for the current rightMode.
 function buildSecondaryTrajectories() {
-  if (rightMode === 'fk') {
+  if (S.rightMode === 'fk') {
     buildFKTrajectories();
-  } else if (rightMode === 'obs_action') {
+  } else if (S.rightMode === 'obs_action') {
     buildActionEETrajectories();
   } else {
     // delta / relative — no secondary trail needed
@@ -506,15 +436,15 @@ function updateEE(frame) {
   const obsR = frame['observation.ee_right'];
 
   // ── Left panel: small obs EE dots overlaid on URDF
-  if (obsL && hasEELeft) { jObsLeftMark.position.copy(worldPos(obsL)); jObsLeftMark.visible = true; }
-  if (obsR && hasEERight){ jObsRightMark.position.copy(worldPos(obsR));jObsRightMark.visible = true; }
+  if (obsL && S.hasEELeft) { jObsLeftMark.position.copy(worldPos(obsL)); jObsLeftMark.visible = true; }
+  if (obsR && S.hasEERight){ jObsRightMark.position.copy(worldPos(obsR));jObsRightMark.visible = true; }
 
   // ── Right panel: observation EE (always shown)
-  if (obsL && hasEELeft) {
+  if (obsL && S.hasEELeft) {
     applyPose(eeLeftFrame, obsL); eeLeftFrame.visible = true;          // applyPose applies offset
     eeObsLeftMark.position.copy(worldPos(obsL)); eeObsLeftMark.visible = true;
   }
-  if (obsR && hasEERight) {
+  if (obsR && S.hasEERight) {
     applyPose(eeRightFrame, obsR); eeRightFrame.visible = true;
     eeObsRightMark.position.copy(worldPos(obsR)); eeObsRightMark.visible = true;
   }
@@ -522,53 +452,53 @@ function updateEE(frame) {
   hideAllSecondary();
 
   // ── Right panel: mode-specific secondary objects
-  if (rightMode === 'fk') {
+  if (S.rightMode === 'fk') {
     // Live FK from URDF (robot joints already applied by applyJoints)
     const fkL = robot ? getEEWorldPos(robot, 'follower_left_ee_gripper_link')  : null;
     const fkR = robot ? getEEWorldPos(robot, 'follower_right_ee_gripper_link') : null;
     if (fkL) { eeSecLeftMark.position.copy(fkL);  eeSecLeftMark.visible  = true; }
     if (fkR) { eeSecRightMark.position.copy(fkR); eeSecRightMark.visible = true; }
-    if (obsL && fkL && hasEELeft)  { setLinePoints(errLeftLine,  worldPos(obsL), fkL); errLeftLine.visible  = true; }
-    if (obsR && fkR && hasEERight) { setLinePoints(errRightLine, worldPos(obsR), fkR); errRightLine.visible = true; }
+    if (obsL && fkL && S.hasEELeft)  { setLinePoints(errLeftLine,  worldPos(obsL), fkL); errLeftLine.visible  = true; }
+    if (obsR && fkR && S.hasEERight) { setLinePoints(errRightLine, worldPos(obsR), fkR); errRightLine.visible = true; }
 
-  } else if (rightMode === 'obs_action') {
+  } else if (S.rightMode === 'obs_action') {
     const actL = frame['action.ee_left'];
     const actR = frame['action.ee_right'];
-    if (actL && hasActionEE) { eeSecLeftMark.position.copy(worldPos(actL));  eeSecLeftMark.visible  = true; }
-    if (actR && hasActionEE) { eeSecRightMark.position.copy(worldPos(actR)); eeSecRightMark.visible = true; }
-    if (obsL && actL && hasEELeft && hasActionEE)  { setLinePoints(errLeftLine,  worldPos(obsL), worldPos(actL)); errLeftLine.visible  = true; }
-    if (obsR && actR && hasEERight && hasActionEE) { setLinePoints(errRightLine, worldPos(obsR), worldPos(actR)); errRightLine.visible = true; }
+    if (actL && S.hasActionEE) { eeSecLeftMark.position.copy(worldPos(actL));  eeSecLeftMark.visible  = true; }
+    if (actR && S.hasActionEE) { eeSecRightMark.position.copy(worldPos(actR)); eeSecRightMark.visible = true; }
+    if (obsL && actL && S.hasEELeft && S.hasActionEE)  { setLinePoints(errLeftLine,  worldPos(obsL), worldPos(actL)); errLeftLine.visible  = true; }
+    if (obsR && actR && S.hasEERight && S.hasActionEE) { setLinePoints(errRightLine, worldPos(obsR), worldPos(actR)); errRightLine.visible = true; }
 
-  } else if (rightMode === 'ee_delta') {
+  } else if (S.rightMode === 'ee_delta') {
     const dL = frame['action.ee_left.delta'];
     const dR = frame['action.ee_right.delta'];
     let magL = 0, magR = 0;
-    if (dL && obsL && hasEEDelta) {
-      arrowLeft.setColor(C_DELTA);
+    if (dL && obsL && S.hasEEDelta) {
+      arrowLeft.setColor(K.C_DELTA);
       magL = updateArrow(arrowLeft,  worldPos(obsL), dL[0], dL[1], dL[2]);
     }
-    if (dR && obsR && hasEEDelta) {
-      arrowRight.setColor(C_DELTA);
+    if (dR && obsR && S.hasEEDelta) {
+      arrowRight.setColor(K.C_DELTA);
       magR = updateArrow(arrowRight, worldPos(obsR), dR[0], dR[1], dR[2]);
     }
     updateModeInfo(`Δ EE L: ${(magL*1000).toFixed(1)} mm  |  Δ EE R: ${(magR*1000).toFixed(1)} mm`);
 
-  } else if (rightMode === 'ee_relative') {
+  } else if (S.rightMode === 'ee_relative') {
     const rL = frame['action.ee_left.relative'];
     const rR = frame['action.ee_right.relative'];
     let magL = 0, magR = 0;
-    if (rL && obsL && hasEERel) {
-      arrowLeft.setColor(C_REL);
+    if (rL && obsL && S.hasEERel) {
+      arrowLeft.setColor(K.C_REL);
       magL = updateArrow(arrowLeft,  worldPos(obsL), rL[0], rL[1], rL[2]);
     }
-    if (rR && obsR && hasEERel) {
-      arrowRight.setColor(C_REL);
+    if (rR && obsR && S.hasEERel) {
+      arrowRight.setColor(K.C_REL);
       magR = updateArrow(arrowRight, worldPos(obsR), rR[0], rR[1], rR[2]);
     }
     updateModeInfo(`Gap L: ${(magL*1000).toFixed(1)} mm  |  Gap R: ${(magR*1000).toFixed(1)} mm`);
   }
 
-  if (rightMode !== 'ee_delta' && rightMode !== 'ee_relative') updateModeInfo('');
+  if (S.rightMode !== 'ee_delta' && S.rightMode !== 'ee_relative') updateModeInfo('');
 }
 
 function updateModeInfo(text) {
@@ -578,20 +508,20 @@ function updateModeInfo(text) {
 
 // ── Mode switching ────────────────────────────────────────────────────────────
 function setLeftMode(mode) {
-  leftMode = mode;
+  S.leftMode = mode;
   document.querySelectorAll('.left-mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
   // Rebuild FK trails when switching (FK validation is still state-based, but
   // left panel trajectory label changes)
   buildSecondaryTrajectories();
-  if (frames[frameIdx]) updateFrame(frameIdx);
+  if (S.frames[S.frameIdx]) updateFrame(S.frameIdx);
 }
 
 function setRightMode(mode) {
-  rightMode = mode;
+  S.rightMode = mode;
   document.querySelectorAll('.right-mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
   updateModeLegend();
   buildSecondaryTrajectories();
-  if (frames[frameIdx]) updateFrame(frameIdx);
+  if (S.frames[S.frameIdx]) updateFrame(S.frameIdx);
 }
 
 function updateModeLegend() {
@@ -621,7 +551,7 @@ function updateModeLegend() {
       <span class="dot rel"></span>Gap vector (left)
       <span class="dot rel"></span>Gap vector (right)`,
   };
-  legend.innerHTML = items[rightMode] ?? '';
+  legend.innerHTML = items[S.rightMode] ?? '';
 }
 
 // Update which mode buttons are unavailable based on dataset features.
@@ -630,15 +560,15 @@ function updateModeLegend() {
 function updateModeButtonAvailability() {
   document.querySelectorAll('.right-mode-btn').forEach(b => {
     let unavailable = false;
-    if (b.dataset.mode === 'obs_action'  && !hasActionEE) unavailable = true;
-    if (b.dataset.mode === 'ee_delta'    && !hasEEDelta)  unavailable = true;
-    if (b.dataset.mode === 'ee_relative' && !hasEERel)    unavailable = true;
+    if (b.dataset.mode === 'obs_action'  && !S.hasActionEE) unavailable = true;
+    if (b.dataset.mode === 'ee_delta'    && !S.hasEEDelta)  unavailable = true;
+    if (b.dataset.mode === 'ee_relative' && !S.hasEERel)    unavailable = true;
     b.classList.toggle('unavailable', unavailable);
     b.title = unavailable
       ? 'Not available for this dataset — re-run joint_to_ee.py with --include-action'
       : '';
     // Fall back to fk if current mode becomes unavailable
-    if (unavailable && rightMode === b.dataset.mode) setRightMode('fk');
+    if (unavailable && S.rightMode === b.dataset.mode) setRightMode('fk');
   });
   document.querySelectorAll('.left-mode-btn').forEach(b =>
     b.classList.remove('unavailable'));
@@ -665,13 +595,13 @@ async function onDatasetChange() {
   if (!opt) return;
   const info = JSON.parse(opt.dataset.info);
 
-  hasEELeft   = info.has_ee_left    ?? false;
-  hasEERight  = info.has_ee_right   ?? false;
-  hasActionEE = info.has_action_ee  ?? false;
-  hasEEDelta  = info.has_ee_delta   ?? false;
-  hasEERel    = info.has_ee_relative?? false;
-  stateNames  = info.state_names    ?? [];
-  actionNames = info.action_names   ?? [];
+  S.hasEELeft   = info.has_ee_left    ?? false;
+  S.hasEERight  = info.has_ee_right   ?? false;
+  S.hasActionEE = info.has_action_ee  ?? false;
+  S.hasEEDelta  = info.has_ee_delta   ?? false;
+  S.hasEERel    = info.has_ee_relative?? false;
+  S.stateNames  = info.state_names    ?? [];
+  S.actionNames = info.action_names   ?? [];
 
   updateModeButtonAvailability();
 
@@ -692,11 +622,11 @@ async function loadEpisode(datasetPath, epIdx) {
     `/api/frames?dataset=${encodeURIComponent(datasetPath)}&episode=${epIdx}`
   ).then(r => r.json());
 
-  frames   = data.frames ?? [];
-  frameIdx = 0;
+  S.frames   = data.frames ?? [];
+  S.frameIdx = 0;
 
   const slider = document.getElementById('frameSlider');
-  slider.max   = Math.max(0, frames.length - 1);
+  slider.max   = Math.max(0, S.frames.length - 1);
   slider.value = 0;
 
   buildObsTrajectories();
@@ -704,15 +634,15 @@ async function loadEpisode(datasetPath, epIdx) {
   buildDataPanelSections();
   buildGraphCharts();
   updateFrame(0);
-  setStatus(`${frames.length} frames at 50 fps  ·  ${(frames.length / 50).toFixed(1)} s`);
+  setStatus(`${S.frames.length} frames at 50 fps  ·  ${(S.frames.length / 50).toFixed(1)} s`);
 }
 
 // ── Playback ──────────────────────────────────────────────────────────────────
 function updateFrame(idx) {
-  frameIdx = Math.max(0, Math.min(idx, frames.length - 1));
-  document.getElementById('frameSlider').value = frameIdx;
-  document.getElementById('frameCounter').textContent = `${frameIdx + 1} / ${frames.length}`;
-  const f = frames[frameIdx];
+  S.frameIdx = Math.max(0, Math.min(idx, S.frames.length - 1));
+  document.getElementById('frameSlider').value = S.frameIdx;
+  document.getElementById('frameCounter').textContent = `${S.frameIdx + 1} / ${S.frames.length}`;
+  const f = S.frames[S.frameIdx];
   if (!f) return;
   applyJoints(f);
   updateEE(f);
@@ -721,22 +651,22 @@ function updateFrame(idx) {
 }
 
 function startPlayback() {
-  if (playing || !frames.length) return;
-  playing = true;
+  if (S.playing || !S.frames.length) return;
+  S.playing = true;
   document.getElementById('playBtn').textContent = '⏸ Pause';
   tick();
 }
 function stopPlayback() {
-  playing = false;
-  if (playTimer) { clearTimeout(playTimer); playTimer = null; }
+  S.playing = false;
+  if (S.playTimer) { clearTimeout(S.playTimer); S.playTimer = null; }
   document.getElementById('playBtn').textContent = '▶ Play';
 }
 function tick() {
-  if (!playing) return;
-  frameIdx = (frameIdx + 1) % frames.length;
-  updateFrame(frameIdx);
+  if (!S.playing) return;
+  S.frameIdx = (S.frameIdx + 1) % S.frames.length;
+  updateFrame(S.frameIdx);
   const speed = parseFloat(document.getElementById('speedSelect').value);
-  playTimer = setTimeout(tick, 1000 / (50 * speed));
+  S.playTimer = setTimeout(tick, 1000 / (50 * speed));
 }
 
 function setStatus(msg) {
@@ -801,11 +731,11 @@ function setupCalibrationUI() {
   });
 
   function snapCurrentFrameToZero(side) {
-    const frame = frames[frameIdx];
+    const frame = S.frames[S.frameIdx];
     if (!frame) return;
     const state = frame['observation.state'];
     if (!state) return;
-    const byName = buildValuesByName(state, STATE_IDX);
+    const byName = buildValuesByName(state, K.STATE_IDX);
     for (let i = 0; i <= 6; i++) {
       const key = `${side}_joint_${i}`;
       if (key in byName) {
@@ -892,7 +822,7 @@ function setupCalibrationUI() {
 let calibChangeTimer = null;
 function onCalibChange() {
   if (calibChangeTimer) clearTimeout(calibChangeTimer);
-  if (frames[frameIdx]) updateFrame(frameIdx);
+  if (S.frames[S.frameIdx]) updateFrame(S.frameIdx);
   calibChangeTimer = setTimeout(() => {
     buildSecondaryTrajectories();
     calibChangeTimer = null;
@@ -915,9 +845,9 @@ function setupModeButtons() {
 
   // Set initial active state
   document.querySelectorAll('.left-mode-btn').forEach(b =>
-    b.classList.toggle('active', b.dataset.mode === leftMode));
+    b.classList.toggle('active', b.dataset.mode === S.leftMode));
   document.querySelectorAll('.right-mode-btn').forEach(b =>
-    b.classList.toggle('active', b.dataset.mode === rightMode));
+    b.classList.toggle('active', b.dataset.mode === S.rightMode));
 
   updateModeLegend();
 }
@@ -955,7 +885,7 @@ function setupDataPanel() {
   btn.addEventListener('click', () => {
     const hidden = panel.classList.toggle('hidden');
     btn.classList.toggle('active', !hidden);
-    if (!hidden && frames[frameIdx]) updateDataPanel(frames[frameIdx]);
+    if (!hidden && S.frames[S.frameIdx]) updateDataPanel(S.frames[S.frameIdx]);
   });
   document.getElementById('dataClose').addEventListener('click', () => {
     panel.classList.add('hidden');
@@ -967,10 +897,10 @@ function setupDataPanel() {
 function buildDataPanelSections() {
   const body = document.getElementById('dataPanelBody');
   body.innerHTML = '';
-  dataValMap = {};
-  if (!frames.length) return;
+  S.dataValMap = {};
+  if (!S.frames.length) return;
 
-  const sample = frames[0];
+  const sample = S.frames[0];
 
   function makeSec(title) {
     const sec = document.createElement('div');
@@ -1021,7 +951,7 @@ function buildDataPanelSections() {
       }
     }
     body.appendChild(sec);
-    dataValMap[frameKey] = els;
+    S.dataValMap[frameKey] = els;
   }
 
   // Pose / vector section — fixed labels based on array length
@@ -1035,11 +965,11 @@ function buildDataPanelSections() {
     const key = frameKey.replace(/[.\s]/g, '-');
     const els = labels.map((l, i) => addRow(sec, l, `dv-${key}-${i}`));
     body.appendChild(sec);
-    dataValMap[frameKey] = els;
+    S.dataValMap[frameKey] = els;
   }
 
-  buildNamedArray('observation.state', 'OBS STATE',  stateNames);
-  buildNamedArray('action',            'ACTION',      actionNames);
+  buildNamedArray('observation.state', 'OBS STATE',  S.stateNames);
+  buildNamedArray('action',            'ACTION',      S.actionNames);
   buildVecSection('observation.ee_left',         'OBS EE LEFT');
   buildVecSection('observation.ee_right',        'OBS EE RIGHT');
   buildVecSection('action.ee_left',              'ACTION EE LEFT');
@@ -1052,7 +982,7 @@ function buildDataPanelSections() {
 
 function updateDataPanel(frame) {
   if (document.getElementById('dataPanel').classList.contains('hidden')) return;
-  for (const [key, els] of Object.entries(dataValMap)) {
+  for (const [key, els] of Object.entries(S.dataValMap)) {
     const data = frame[key];
     if (!data || !Array.isArray(data)) continue;
     for (let i = 0; i < els.length; i++) {
@@ -1073,7 +1003,7 @@ const frameCursorPlugin = {
   afterDatasetsDraw(chart) {
     const { ctx, chartArea, scales } = chart;
     if (!chartArea || !scales.x) return;
-    const x = scales.x.getPixelForValue(frameIdx);
+    const x = scales.x.getPixelForValue(S.frameIdx);
     if (x < chartArea.left || x > chartArea.right) return;
 
     ctx.save();
@@ -1085,7 +1015,7 @@ const frameCursorPlugin = {
     ctx.stroke();
 
     for (const ds of chart.data.datasets) {
-      const v = ds.data[frameIdx];
+      const v = ds.data[S.frameIdx];
       if (v == null) continue;
       const y = scales.y.getPixelForValue(v);
       ctx.fillStyle = ds.borderColor;
@@ -1118,16 +1048,16 @@ function buildGraphCharts() {
 
   const body = document.getElementById('graphPanelBody');
   body.innerHTML = '';
-  if (!frames.length) return;
+  if (!S.frames.length) return;
 
   const C = window.Chart;
   if (!C) { console.warn('Chart.js not loaded'); return; }
 
-  const sample = frames[0];
-  const labels = Array.from({ length: frames.length }, (_, i) => i);
+  const sample = S.frames[0];
+  const labels = Array.from({ length: S.frames.length }, (_, i) => i);
 
   function colData(key, idx) {
-    return frames.map(f => { const a = f[key]; return (a && idx < a.length) ? a[idx] : null; });
+    return S.frames.map(f => { const a = f[key]; return (a && idx < a.length) ? a[idx] : null; });
   }
 
   function addGroup(title, series) {
@@ -1201,7 +1131,7 @@ function buildGraphCharts() {
           const pts = chart.getElementsAtEventForMode(_evt, 'index', { intersect: false }, false);
           if (!pts.length) return;
           stopPlayback();
-          updateFrame(Math.max(0, Math.min(pts[0].index, frames.length - 1)));
+          updateFrame(Math.max(0, Math.min(pts[0].index, S.frames.length - 1)));
         },
         scales: {
           x: {
@@ -1251,8 +1181,8 @@ function buildGraphCharts() {
     })));
   }
 
-  defineNamedArray('observation.state', 'State',  stateNames);
-  defineNamedArray('action',            'Action', actionNames);
+  defineNamedArray('observation.state', 'State',  S.stateNames);
+  defineNamedArray('action',            'Action', S.actionNames);
   defineVec('observation.ee_left',      'Obs EE Left',      7);
   defineVec('observation.ee_right',     'Obs EE Right',     7);
   defineVec('action.ee_left',           'Action EE Left',   7);
@@ -1280,7 +1210,7 @@ async function init() {
   animate();
 
   document.getElementById('playBtn').addEventListener('click', () =>
-    playing ? stopPlayback() : startPlayback());
+    S.playing ? stopPlayback() : startPlayback());
   document.getElementById('frameSlider').addEventListener('input', e => {
     stopPlayback();
     updateFrame(+e.target.value);
@@ -1298,7 +1228,7 @@ async function init() {
   loadRobot()
     .then(() => {
       buildSecondaryTrajectories();
-      updateFrame(frameIdx);
+      updateFrame(S.frameIdx);
       setStatus('Ready');
     })
     .catch(err => {
