@@ -259,6 +259,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._file(URDF_PATH)
             elif p.startswith("/lib/"):
                 self._file(VIEWER_DIR / "lib" / p[5:])
+            elif p.startswith("/js/"):
+                self._file(VIEWER_DIR / p.lstrip("/"))
             elif p.startswith("/pkg/trossen_arm_description/"):
                 self._file(TROSSEN_DIR / p[len("/pkg/trossen_arm_description/"):])
             # Wizard
@@ -392,7 +394,7 @@ def main():
     ap = argparse.ArgumentParser(description="Dataset Tools Server")
     ap.add_argument("--port",  type=int, default=8080)
     ap.add_argument("--cache", type=str,
-                    default=str(Path("/home/edgeai/lerobot/cache")),
+                    default=str(Path.home() / ".cache/huggingface/lerobot"),
                     help="Path to LeRobot dataset cache")
     args = ap.parse_args()
 
