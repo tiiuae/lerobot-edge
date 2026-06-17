@@ -92,6 +92,16 @@ def should_run(stage: str) -> bool:
     return STAGES.index(start_from) <= STAGES.index(stage) <= STAGES.index(stop_at)
 
 
+# When merge or EE run they produce output_directory, so compress/upload read from there.
+# When both are skipped the first selected dataset is the source (it already exists).
+_has_producing_stage = should_run("merge") or should_run("ee_conversion")
+compress_source = (
+    output_directory
+    if _has_producing_stage
+    else (base_dataset_root / move_dataset_repo_ids[0] if move_dataset_repo_ids else output_directory)
+)
+
+
 # ── Stage 1: Conversion ───────────────────────────────────────────────────────
 
 if should_run("conversion"):
@@ -245,11 +255,11 @@ else:
 
 if should_run("compress"):
     console.rule("[bold cyan]Stage 4 — Compress[/]")
-    zip_path = output_directory.with_suffix(".zip")
+    zip_path = compress_source.with_suffix(".zip")
 
-    if not output_directory.is_dir():
+    if not compress_source.is_dir():
         console.print(Panel(
-            f"[bold]{output_directory}[/] does not exist.\n\n"
+            f"[bold]{compress_source}[/] does not exist.\n\n"
             "Update the [bold cyan]Output Dir[/] field in the wizard to match "
             "the target directory name, then save the config and re-run.",
             title="[bold red]Compress Failed — Directory Not Found[/]",
@@ -257,12 +267,12 @@ if should_run("compress"):
         ))
         raise SystemExit(1)
 
-    files = sorted(f for f in output_directory.rglob("*") if f.is_file())
+    files = sorted(f for f in compress_source.rglob("*") if f.is_file())
     total = len(files)
 
     if total == 0:
         console.print(Panel(
-            f"[bold]{output_directory}[/] exists but contains no files.\n\n"
+            f"[bold]{compress_source}[/] exists but contains no files.\n\n"
             "Check that the [bold cyan]Output Dir[/] field points to a "
             "valid LeRobot dataset directory.",
             title="[bold red]Compress Failed — Empty Directory[/]",
@@ -275,7 +285,7 @@ if should_run("compress"):
     step = max(1, total // 25)
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for i, f in enumerate(files):
-            zf.write(f, f.relative_to(output_directory))
+            zf.write(f, f.relative_to(compress_source))
             n = i + 1
             if n % step == 0 or n == total:
                 pct    = n / total * 100
@@ -295,7 +305,7 @@ else:
 
 if should_run("upload"):
     console.rule("[bold cyan]Stage 5 — Upload (SFTP)[/]")
-    zip_path = output_directory.with_suffix(".zip")
+    zip_path = compress_source.with_suffix(".zip")
 
     if not zip_path.exists():
         console.print(f"  [red]✘[/]  Archive not found: [bold]{zip_path}[/]")
