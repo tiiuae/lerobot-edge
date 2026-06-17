@@ -78,7 +78,7 @@ with open(args.config) as f:
 
 move_dataset_repo_ids = cfg["datasets"]
 base_dataset_root     = Path(cfg["base_path"]).expanduser()
-merged_repo_id        = cfg["merged_name"]
+merged_repo_id        = cfg.get("output_dir") or cfg.get("merged_name", "output_dataset")
 output_directory      = base_dataset_root / merged_repo_id
 
 start_from = args.start_from or cfg.get("start_from", "conversion")
@@ -203,10 +203,22 @@ if should_run("ee_conversion"):
         ))
     else:
         console.rule("[bold cyan]Stage 3 — EE conversion + action representations[/]")
+        # When merge ran, its output is the EE input (in-place).
+        # When merge was skipped, the first selected dataset is the input and
+        # output_directory is where the enriched copy will be written.
+        if should_run("merge"):
+            ee_input_directory = output_directory
+        else:
+            ee_input_directory = (
+                base_dataset_root / move_dataset_repo_ids[0]
+                if move_dataset_repo_ids else output_directory
+            )
+        console.print(f"  Input  : [dim]{ee_input_directory}[/]")
+        console.print(f"  Output : [dim]{output_directory}[/]")
         try:
             joint_to_ee.process_dataset(
-                dataset_root=output_directory,
-                output_root=output_directory,   # in-place
+                dataset_root=ee_input_directory,
+                output_root=output_directory,
                 ref_frame=ref_frame,
                 include_joint_repr=include_joint_repr,
                 rot_repr=rot_repr,
@@ -214,11 +226,9 @@ if should_run("ee_conversion"):
         except ValueError as exc:
             console.print(Panel(
                 f"[bold]{exc}[/]\n\n"
-                "[dim]The dataset was already enriched by a previous run.[/]\n\n"
-                "To fix, choose one of:\n"
-                "  • Re-run with [bold cyan]--start-from merge[/] to rebuild a fresh merged dataset,\n"
-                "    then re-add [bold cyan]--start-from ee_conversion[/].\n"
-                "  • Or delete the merged dataset directory and re-run the full pipeline.",
+                "[dim]The output directory was already enriched by a previous run.[/]\n\n"
+                "To fix, delete the output directory and re-run, or change the "
+                "[bold cyan]Output Dir[/] field in the wizard to a fresh name.",
                 title="[bold red]EE Conversion Failed — Features Already Exist[/]",
                 border_style="red",
             ))
@@ -240,9 +250,8 @@ if should_run("compress"):
     if not output_directory.is_dir():
         console.print(Panel(
             f"[bold]{output_directory}[/] does not exist.\n\n"
-            "If you renamed the merged dataset, update the "
-            "[bold cyan]Merged Name[/] field in the wizard to match "
-            "the new directory name, then save the config and re-run.",
+            "Update the [bold cyan]Output Dir[/] field in the wizard to match "
+            "the target directory name, then save the config and re-run.",
             title="[bold red]Compress Failed — Directory Not Found[/]",
             border_style="red",
         ))
@@ -254,7 +263,7 @@ if should_run("compress"):
     if total == 0:
         console.print(Panel(
             f"[bold]{output_directory}[/] exists but contains no files.\n\n"
-            "Check that the [bold cyan]Merged Name[/] field points to a "
+            "Check that the [bold cyan]Output Dir[/] field points to a "
             "valid LeRobot dataset directory.",
             title="[bold red]Compress Failed — Empty Directory[/]",
             border_style="red",

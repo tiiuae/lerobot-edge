@@ -28,7 +28,11 @@ function setupConfig() {
     document.getElementById('btn-refresh-datasets')
         .addEventListener('click', () => refreshDatasets());
     document.getElementById('base-path')
-        .addEventListener('change', () => refreshDatasets());
+        .addEventListener('change', () => { refreshDatasets(); updateOutputPathHint(); });
+    document.getElementById('output-dir')
+        .addEventListener('input', updateOutputPathHint);
+    document.getElementById('dataset-checklist')
+        .addEventListener('change', suggestOutputDir);
     document.getElementById('btn-select-all')
         .addEventListener('click', () => setAllChecked(true));
     document.getElementById('btn-deselect-all')
@@ -45,8 +49,8 @@ async function loadConfig() {
         const cfg = await api('/api/wizard/config');
         if (cfg.error) return;
 
-        if (cfg.base_path)   set('base-path',   cfg.base_path);
-        if (cfg.merged_name) set('merged-name',  cfg.merged_name);
+        if (cfg.base_path)                        set('base-path',  cfg.base_path);
+        if (cfg.output_dir || cfg.merged_name)    set('output-dir', cfg.output_dir || cfg.merged_name);
         if (cfg.start_from)  set('start-from',   cfg.start_from);
         if (cfg.stop_at)     set('stop-at',       cfg.stop_at);
 
@@ -66,6 +70,7 @@ async function loadConfig() {
         if (sftp.remote_path) set('sftp-remote',    sftp.remote_path);
 
         updatePipelineHighlight();
+        updateOutputPathHint();
 
         if (cfg.base_path) {
             await refreshDatasets(cfg.datasets || null);
@@ -80,8 +85,8 @@ function buildConfig() {
         .map(cb => cb.value);
 
     const cfg = {
-        base_path:   get('base-path'),
-        merged_name: get('merged-name') || 'merged_dataset',
+        base_path:  get('base-path'),
+        output_dir: get('output-dir') || 'output_dataset',
         start_from:  get('start-from'),
         stop_at:     get('stop-at'),
         datasets,
@@ -150,6 +155,7 @@ async function refreshDatasets(preChecked = null) {
                 <span class="check-meta">${d.total_episodes} ep · ${d.total_frames} fr</span>
             </label>`;
         }).join('');
+        suggestOutputDir();
     } catch (e) {
         list.innerHTML = `<span class="hint err">Error: ${e.message}</span>`;
     }
@@ -160,11 +166,12 @@ async function refreshDatasets(preChecked = null) {
 const STAGES = ['conversion', 'merge', 'ee_conversion', 'compress', 'upload'];
 
 function setupPipeline() {
-    document.getElementById('start-from').addEventListener('change', updatePipelineHighlight);
-    document.getElementById('stop-at').addEventListener('change', updatePipelineHighlight);
+    document.getElementById('start-from').addEventListener('change', () => { updatePipelineHighlight(); suggestOutputDir(); });
+    document.getElementById('stop-at').addEventListener('change',    () => { updatePipelineHighlight(); suggestOutputDir(); });
     document.getElementById('ee-enabled').addEventListener('change', () => {
         updateEEEnabled();
         updatePipelineHighlight();
+        suggestOutputDir();
     });
     updateEEEnabled();
     updatePipelineHighlight();
@@ -361,6 +368,52 @@ function showStatus(msg, type) {
     const el = document.getElementById('run-status');
     el.textContent = msg;
     el.className = 'run-status ' + (type || '');
+}
+
+// ── Output dir helpers ────────────────────────────────────────────────────────
+
+function suggestOutputDir() {
+    const el = document.getElementById('output-dir');
+    if (!el || el.value.trim()) return; // don't override user-set value
+
+    const checked = [...document.querySelectorAll('#dataset-checklist input[type=checkbox]:checked')]
+        .map(cb => cb.value);
+    if (!checked.length) return;
+
+    const startFrom = get('start-from') || 'conversion';
+    const stopAt    = get('stop-at')    || 'upload';
+    const eeEnabled = document.getElementById('ee-enabled').checked;
+
+    const si = STAGES.indexOf(startFrom);
+    const ei = STAGES.indexOf(stopAt);
+    const mergeIdx = STAGES.indexOf('merge');
+    const eeIdx    = STAGES.indexOf('ee_conversion');
+
+    const runsMerge = si <= mergeIdx && mergeIdx <= ei;
+    const runsEE    = eeEnabled && si <= eeIdx && eeIdx <= ei;
+
+    // Strip common trailing counters/version tags from first dataset name
+    const base = checked[0].replace(/[_-]v?\d+$/, '');
+
+    const suffixes = [];
+    if (runsMerge && checked.length > 1) suffixes.push('merged');
+    if (runsEE)                          suffixes.push('ee');
+
+    el.value = suffixes.length ? `${base}_${suffixes.join('_')}` : base;
+    updateOutputPathHint();
+}
+
+function updateOutputPathHint() {
+    const hint = document.getElementById('output-path-hint');
+    if (!hint) return;
+    const basePath  = get('base-path').replace(/\/$/, '');
+    const outputDir = get('output-dir');
+    if (basePath && outputDir) {
+        hint.textContent = basePath + '/' + outputDir;
+        hint.style.display = '';
+    } else {
+        hint.style.display = 'none';
+    }
 }
 
 // ── Dataset Preview ───────────────────────────────────────────────────────────
@@ -562,10 +615,13 @@ function externalWizardTooltip({ chart, tooltip }) {
 }
 
 const PALETTE = [
-    '#4a9eff','#e34c26','#4ec994','#e5b600','#c084fc',
-    '#fb7185','#38bdf8','#a3e635','#f97316','#818cf8',
-    '#f472b6','#34d399','#facc15','#60a5fa','#a78bfa',
-    '#fb923c','#2dd4bf','#e879f9','#4ade80','#fbbf24',
+    '#4a9eff','#ff5555','#50fa7b','#ffb86c','#bd93f9',
+    '#ff79c6','#8be9fd','#f1fa8c','#ff6e6e','#5af78e',
+    '#caa9fa','#ffca6a','#1dc9a4','#ff92d0','#6272a4',
+    '#44bc9f','#e06c75','#61afef','#98c379','#d19a66',
+    '#c678dd','#56b6c2','#e5c07b','#be5046','#2ecc71',
+    '#e74c3c','#3498db','#9b59b6','#f39c12','#1abc9c',
+    '#e67e22','#27ae60','#8e44ad','#16a085','#d35400',
 ];
 
 function makeWizardChart(canvas, data, names, title) {

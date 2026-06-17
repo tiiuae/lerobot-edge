@@ -7,7 +7,13 @@ import { eeLabels } from './labels.js';
 // at runtime since these are only used inside event callbacks.
 import { stopPlayback, updateFrame } from './playback.js';
 
-export const SERIES_COLORS = ['#ff6b6b','#ffa94d','#ffd43b','#69db7c','#74c0fc','#da77f2','#f8a5c2'];
+export const SERIES_COLORS = [
+    '#ff6b6b','#4a9eff','#50fa7b','#ffb86c','#bd93f9',
+    '#ff79c6','#8be9fd','#f1fa8c','#ff6e6e','#5af78e',
+    '#caa9fa','#ffca6a','#1dc9a4','#ff92d0','#6272a4',
+    '#44bc9f','#e06c75','#61afef','#98c379','#d19a66',
+    '#c678dd','#56b6c2','#e5c07b','#be5046','#2ecc71',
+];
 
 export let graphInstances = [];  // Chart.js instances
 
@@ -191,7 +197,7 @@ export function buildGraphCharts() {
     const len    = arr.length;
     const lbls   = eeLabels(frameKey, len);
     const posC   = ['#ff6b6b', '#69db7c', '#74c0fc'];
-    const extraC = ['#da77f2', '#ffa94d', '#ffd43b', '#f8a5c2', '#8ce99a'];
+    const extraC = ['#bd93f9','#ffb86c','#f1fa8c','#ff79c6','#8be9fd','#caa9fa','#ffca6a','#1dc9a4','#ff92d0','#44bc9f'];
     const colors = [...posC, ...extraC].slice(0, len);
     addGroup(title, Array.from({ length: len }, (_, i) => ({
       data: colData(frameKey, i), color: colors[i], label: lbls[i],

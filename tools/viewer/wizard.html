@@ -33,9 +33,12 @@
       </div>
 
       <div class="field-row">
-        <label for="merged-name">Merged Name</label>
-        <input id="merged-name" type="text"
-               placeholder="merged_dataset" spellcheck="false">
+        <label for="output-dir">Output Dir</label>
+        <div style="display:flex;flex-direction:column;gap:3px;min-width:0">
+          <input id="output-dir" type="text"
+                 placeholder="output_dataset" spellcheck="false" autocomplete="off">
+          <div class="path-hint" id="output-path-hint" style="display:none"></div>
+        </div>
       </div>
 
       <div class="field-row align-top">
