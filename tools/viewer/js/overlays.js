@@ -2,6 +2,7 @@
 
 import * as THREE from 'three';
 import * as K from './constants.js';
+import { VC } from './vis-config.js';
 import { S } from './state.js';
 import { baseLinkOffset, robot, buildValuesByName, applyRobotJoints, getEEWorldPos, applyJoints } from './robot.js';
 import { frameError } from './validation.js';
@@ -52,13 +53,13 @@ export function buildObsTrajectories() {
 
   if (S.hasEELeft) {
     const pts = S.frames.map(f => f['observation.ee_left']).filter(Boolean).map(worldPos);
-    sceneRefs.eeObsLeftTrail = makeLine(pts, K.C_OBS_L, 0.6); eRosRoot.add(sceneRefs.eeObsLeftTrail);
-    sceneRefs.jObsLeftTrail  = makeLine(pts, K.C_OBS_L, 0.6); jRosRoot.add(sceneRefs.jObsLeftTrail);
+    sceneRefs.eeObsLeftTrail = makeLine(pts, VC.trailObsLColor, VC.trailOpacity); eRosRoot.add(sceneRefs.eeObsLeftTrail);
+    sceneRefs.jObsLeftTrail  = makeLine(pts, VC.trailObsLColor, VC.trailOpacity); jRosRoot.add(sceneRefs.jObsLeftTrail);
   }
   if (S.hasEERight) {
     const pts = S.frames.map(f => f['observation.ee_right']).filter(Boolean).map(worldPos);
-    sceneRefs.eeObsRightTrail = makeLine(pts, K.C_OBS_R, 0.6); eRosRoot.add(sceneRefs.eeObsRightTrail);
-    sceneRefs.jObsRightTrail  = makeLine(pts, K.C_OBS_R, 0.6); jRosRoot.add(sceneRefs.jObsRightTrail);
+    sceneRefs.eeObsRightTrail = makeLine(pts, VC.trailObsRColor, VC.trailOpacity); eRosRoot.add(sceneRefs.eeObsRightTrail);
+    sceneRefs.jObsRightTrail  = makeLine(pts, VC.trailObsRColor, VC.trailOpacity); jRosRoot.add(sceneRefs.jObsRightTrail);
   }
 }
 
@@ -81,8 +82,8 @@ export function buildFKTrajectories() {
     if (lPos) ptsL.push(lPos.clone());
     if (rPos) ptsR.push(rPos.clone());
   }
-  if (ptsL.length) { sceneRefs.eeSecLeftTrail  = makeLine(ptsL, K.C_SEC_L, 0.5); eRosRoot.add(sceneRefs.eeSecLeftTrail); }
-  if (ptsR.length) { sceneRefs.eeSecRightTrail = makeLine(ptsR, K.C_SEC_R, 0.5); eRosRoot.add(sceneRefs.eeSecRightTrail); }
+  if (ptsL.length) { sceneRefs.eeSecLeftTrail  = makeLine(ptsL, VC.trailSecLColor, VC.trailOpacity); eRosRoot.add(sceneRefs.eeSecLeftTrail); }
+  if (ptsR.length) { sceneRefs.eeSecRightTrail = makeLine(ptsR, VC.trailSecRColor, VC.trailOpacity); eRosRoot.add(sceneRefs.eeSecRightTrail); }
 
   // Restore current frame
   if (S.frames[S.frameIdx]) applyJoints(S.frames[S.frameIdx]);
@@ -96,8 +97,8 @@ export function buildActionEETrajectories() {
   if (!S.hasActionEE) return;
   const ptsL = S.frames.map(f => f['action.ee_left'] ).filter(Boolean).map(worldPos);
   const ptsR = S.frames.map(f => f['action.ee_right']).filter(Boolean).map(worldPos);
-  if (ptsL.length) { sceneRefs.eeSecLeftTrail  = makeLine(ptsL, K.C_SEC_L, 0.5); eRosRoot.add(sceneRefs.eeSecLeftTrail); }
-  if (ptsR.length) { sceneRefs.eeSecRightTrail = makeLine(ptsR, K.C_SEC_R, 0.5); eRosRoot.add(sceneRefs.eeSecRightTrail); }
+  if (ptsL.length) { sceneRefs.eeSecLeftTrail  = makeLine(ptsL, VC.trailSecLColor, VC.trailOpacity); eRosRoot.add(sceneRefs.eeSecLeftTrail); }
+  if (ptsR.length) { sceneRefs.eeSecRightTrail = makeLine(ptsR, VC.trailSecRColor, VC.trailOpacity); eRosRoot.add(sceneRefs.eeSecRightTrail); }
 }
 
 // Rebuild secondary trajectories for the current rightMode.

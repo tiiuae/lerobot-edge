@@ -26,8 +26,12 @@
   <header>
     <span class="logo">Robot Dataset Viewer</span>
     <div class="header-controls">
+      <!-- ── Dataset folder-browser selector ── -->
       <label>Dataset
-        <select id="datasetSelect"><option>Loading…</option></select>
+        <div class="ds-picker">
+          <span id="dsDisplay" class="ds-display" title="">Loading…</span>
+          <button id="dsBrowseBtn" class="ds-browse-btn" title="Browse datasets">📁</button>
+        </div>
       </label>
       <label>Episode
         <select id="episodeSelect"></select>
@@ -48,13 +52,28 @@
     </div>
     <button id="dataBtn"  title="Inspect dataset values">Values</button>
     <button id="graphBtn" title="Dataset graphs">Graphs</button>
+    <button id="styleBtn" title="Visual settings">Style</button>
     <button id="calibBtn" title="Joint calibration">⚙</button>
     <button id="helpBtn"  title="Help">?</button>
     <a href="/wizard" style="margin-left:6px;font-size:12px;color:#8b949e;text-decoration:none;border:1px solid #30363d;border-radius:4px;padding:4px 10px;font-family:monospace" onmouseover="this.style.color='#e6edf3'" onmouseout="this.style.color='#8b949e'">Wizard</a>
     <a href="/"       style="margin-left:4px;font-size:12px;color:#8b949e;text-decoration:none;border:1px solid #30363d;border-radius:4px;padding:4px 10px;font-family:monospace" onmouseover="this.style.color='#e6edf3'" onmouseout="this.style.color='#8b949e'">← Home</a>
   </header>
 
-  <!-- ── Dataset values inspector panel ────────────────────────────── -->
+  <!-- ── Dataset folder browser modal ──────────────────────────────────── -->
+  <div id="dsBrowserOverlay" class="ds-overlay hidden" role="dialog" aria-modal="true" aria-label="Select dataset">
+    <div class="ds-modal">
+      <div class="ds-modal-hdr">
+        <span>Select Dataset</span>
+        <button id="dsBrowserClose" aria-label="Close">✕</button>
+      </div>
+      <div class="ds-path-bar">
+        <span id="dsBrowserPath" class="ds-path-text"></span>
+      </div>
+      <div id="dsBrowserEntries" class="ds-entries"></div>
+    </div>
+  </div>
+
+  <!-- ── Dataset values inspector panel ────────────────────────────────── -->
   <div id="dataPanel" class="data-panel hidden" role="dialog" aria-label="Dataset values">
     <div class="data-panel-hdr">
       <span>Dataset Values</span>
@@ -63,7 +82,7 @@
     <div id="dataPanelBody"></div>
   </div>
 
-  <!-- ── Graphs panel ───────────────────────────────────────────────── -->
+  <!-- ── Graphs panel ───────────────────────────────────────────────────── -->
   <div id="graphPanel" class="graph-panel hidden" role="dialog" aria-label="Data graphs">
     <div class="graph-panel-hdr">
       <span>Data Graphs</span>
@@ -72,7 +91,61 @@
     <div id="graphPanelBody"></div>
   </div>
 
-  <!-- ── Joint calibration panel ─────────────────────────────────────── -->
+  <!-- ── Visual settings panel ──────────────────────────────────────────── -->
+  <div id="settingsPanel" class="settings-panel hidden" role="dialog" aria-label="Visual settings">
+    <div class="settings-hdr">
+      <span>Visual Settings</span>
+      <button id="settingsClose" aria-label="Close">✕</button>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-sec-hdr">3D Scene</div>
+      <div class="settings-row">
+        <label class="settings-lbl">Background</label>
+        <input type="color" id="vc-bg-color">
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-sec-hdr">Trajectories</div>
+      <div class="settings-row">
+        <label class="settings-lbl">Obs Left</label>
+        <input type="color" id="vc-obs-l">
+      </div>
+      <div class="settings-row">
+        <label class="settings-lbl">Obs Right</label>
+        <input type="color" id="vc-obs-r">
+      </div>
+      <div class="settings-row">
+        <label class="settings-lbl">Sec Left</label>
+        <input type="color" id="vc-sec-l">
+      </div>
+      <div class="settings-row">
+        <label class="settings-lbl">Sec Right</label>
+        <input type="color" id="vc-sec-r">
+      </div>
+      <div class="settings-row">
+        <label class="settings-lbl">Opacity</label>
+        <input type="range" id="vc-opacity" min="0.05" max="1" step="0.05" style="flex:1">
+        <span class="settings-val" id="vc-opacity-val">0.60</span>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-sec-hdr">Charts</div>
+      <div class="settings-row">
+        <label class="settings-lbl">Line Width</label>
+        <input type="range" id="vc-chart-width" min="0.5" max="4" step="0.1" style="flex:1">
+        <span class="settings-val" id="vc-chart-width-val">1.2</span>
+      </div>
+    </div>
+
+    <div class="settings-actions">
+      <button id="vcResetBtn">Reset defaults</button>
+    </div>
+  </div>
+
+  <!-- ── Joint calibration panel ─────────────────────────────────────────── -->
   <div id="calibPanel" class="calib-panel hidden" role="dialog" aria-label="Joint calibration">
     <div class="calib-header">
       <span>Joint Calibration</span>
@@ -88,7 +161,7 @@
     </div>
   </div>
 
-  <!-- ── Help modal ──────────────────────────────────────────────────── -->
+  <!-- ── Help modal ──────────────────────────────────────────────────────── -->
   <div id="helpOverlay" class="help-overlay hidden" role="dialog" aria-modal="true">
     <div class="help-box">
       <button class="help-close" id="helpClose" aria-label="Close help">✕</button>
@@ -157,6 +230,19 @@
       </section>
 
       <section>
+        <h3>Camera view presets</h3>
+        <p>Use the view buttons overlaid in each 3D panel (top-right corner) to snap to standard orientations:
+           <strong>Top</strong>, <strong>Front</strong>, <strong>L</strong>, <strong>R</strong>, <strong>Back</strong>, <strong>Iso</strong>.
+           Both panels share one camera. Orbit/zoom/pan freely after snapping.</p>
+      </section>
+
+      <section>
+        <h3>Visual settings <em>(Style button)</em></h3>
+        <p>Adjust 3D background color, trajectory colors and opacity, and chart line width.
+           Settings persist in <code>localStorage</code>. Use "Reset defaults" to revert.</p>
+      </section>
+
+      <section>
         <h3>Joint calibration <em>(gear button ⚙)</em></h3>
         <p>Per-arm calibration:
            <code>urdf = sign × value + offset</code> per joint, per side.
@@ -191,10 +277,10 @@
       </section>
 
       <section>
-        <h3>Dataset &amp; Episode selectors</h3>
-        <p>All LeRobot datasets found in the cache directory are listed.
-           Datasets without EE columns still show the joint-space panel;
-           the EE overlays are hidden automatically.</p>
+        <h3>Dataset selector</h3>
+        <p>Click 📁 to browse your filesystem and select any LeRobot dataset directory.
+           Folders with a <strong>dataset</strong> badge contain a valid dataset — click to load.
+           Non-dataset folders navigate into them. The first found dataset loads automatically on startup.</p>
       </section>
     </div>
   </div>
@@ -203,11 +289,27 @@
     <div class="panel" id="jointPanel">
       <div class="panel-title">Joint Space <span class="panel-subtitle">· Robot / Action buttons</span></div>
       <canvas id="jointCanvas"></canvas>
+      <div class="cam-views">
+        <button class="cam-btn" data-view="top"   title="Top view">Top</button>
+        <button class="cam-btn" data-view="front" title="Front view">Front</button>
+        <button class="cam-btn" data-view="left"  title="Left side">L</button>
+        <button class="cam-btn" data-view="right" title="Right side">R</button>
+        <button class="cam-btn" data-view="back"  title="Back view">Back</button>
+        <button class="cam-btn" data-view="iso"   title="Isometric view">Iso</button>
+      </div>
     </div>
     <div class="gutter"></div>
     <div class="panel" id="eePanel">
       <div class="panel-title">EE Analysis <span class="panel-subtitle">· EE buttons</span></div>
       <canvas id="eeCanvas"></canvas>
+      <div class="cam-views">
+        <button class="cam-btn" data-view="top"   title="Top view">Top</button>
+        <button class="cam-btn" data-view="front" title="Front view">Front</button>
+        <button class="cam-btn" data-view="left"  title="Left side">L</button>
+        <button class="cam-btn" data-view="right" title="Right side">R</button>
+        <button class="cam-btn" data-view="back"  title="Back view">Back</button>
+        <button class="cam-btn" data-view="iso"   title="Isometric view">Iso</button>
+      </div>
       <div class="legend" id="eeLegend"></div>
       <div class="fk-stats" id="fkStats" hidden></div>
       <div class="fk-err-chart-wrap" id="fkErrChartWrap" hidden><canvas id="fkErrChart"></canvas></div>

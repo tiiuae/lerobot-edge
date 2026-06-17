@@ -1,6 +1,7 @@
 // Chart.js graphs panel: setup, build, render.
 
 import { S } from './state.js';
+import { VC } from './vis-config.js';
 import { makeDraggable } from './calibration.js';
 import { eeLabels } from './labels.js';
 // stopPlayback and updateFrame are imported here; circular references resolve
@@ -101,7 +102,7 @@ export function buildGraphCharts() {
           data:            s.data,
           borderColor:     s.color,
           backgroundColor: 'transparent',
-          borderWidth:     1.2,
+          borderWidth:     VC.chartBorderWidth,
           pointRadius:     0,
           tension:         0,
         })),

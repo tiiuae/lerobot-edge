@@ -417,6 +417,16 @@ button {
 
 .charts-grid    { display: flex; flex-direction: column; gap: 10px; }
 
+.charts-section-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin: 12px 0 6px;
+    padding-left: 2px;
+}
+
 .chart-wrap {
     background: var(--bg);
     border: 1px solid var(--border);

@@ -5,6 +5,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { ColladaLoader }  from 'three/examples/jsm/loaders/ColladaLoader.js';
 import URDFLoader         from 'urdf-loader';
 import * as K from './constants.js';
+import { VC } from './vis-config.js';
 
 // ── Singleton scene variables ─────────────────────────────────────────────────
 export let jRenderer = null, jScene = null, jCamera = null, jControls = null, jRosRoot = null;
@@ -141,8 +142,8 @@ export function setupJointScene() {
   jRenderer.shadowMap.type    = THREE.PCFSoftShadowMap;
 
   jScene = new THREE.Scene();
-  jScene.background = new THREE.Color(K.BG);
-  jScene.fog = new THREE.Fog(K.BG, 10, 25);
+  jScene.background = new THREE.Color(VC.bgColor);
+  jScene.fog = new THREE.Fog(VC.bgColor, 10, 25);
 
   jRosRoot = new THREE.Group();
   jScene.add(jRosRoot);
@@ -167,8 +168,8 @@ export function setupEEScene() {
   eRenderer.shadowMap.type    = THREE.PCFSoftShadowMap;
 
   eScene = new THREE.Scene();
-  eScene.background = new THREE.Color(K.BG);
-  eScene.fog = new THREE.Fog(K.BG, 10, 25);
+  eScene.background = new THREE.Color(VC.bgColor);
+  eScene.fog = new THREE.Fog(VC.bgColor, 10, 25);
 
   eRosRoot = new THREE.Group();
   eScene.add(eRosRoot);
@@ -219,6 +220,27 @@ export function setupEEScene() {
   eRosRoot.add(arrowLeft, arrowRight);
 
   ({ cam: eCamera, ctrl: eControls } = makeCamera(canvas, [3.0, -3.5, 2.0], [0.35, 0.0, 1.0]));
+}
+
+// ── Camera snap to preset views ───────────────────────────────────────────────
+// Uses jControls (primary) as reference; camera sync propagates to eCamera.
+// Top view uses slight Y offset to avoid gimbal lock (camera.up is Z).
+export function snapCamera(view) {
+  const t = jControls.target;
+  const D = 4;
+  const presets = {
+    top:    [t.x,       t.y - 0.5, t.z + D],
+    bottom: [t.x,       t.y - 0.5, t.z - D],
+    front:  [t.x,       t.y - D,   t.z    ],
+    back:   [t.x,       t.y + D,   t.z    ],
+    left:   [t.x + D,   t.y,       t.z    ],
+    right:  [t.x - D,   t.y,       t.z    ],
+    iso:    [t.x + 3.0, t.y - 3.5, t.z + 2.0],
+  };
+  const pos = presets[view];
+  if (!pos) return;
+  jCamera.position.set(...pos);
+  jControls.update();
 }
 
 // ── Camera sync ───────────────────────────────────────────────────────────────

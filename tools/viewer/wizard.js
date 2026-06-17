@@ -521,13 +521,21 @@ function renderPreview(frames) {
     const stateNames  = meta.state_names  || [];
     const actionNames = meta.action_names || [];
 
-    const body = document.getElementById('preview-body');
-    body.innerHTML = `
-        <div class="preview-info">
-            <span>${frames.length} frames</span>
-            <span>state ${stateDim}D</span>
-            <span>action ${actionDim}D</span>
-        </div>
+    // Detect EE fields present in this episode
+    const EE_DIM_NAMES = ['x', 'y', 'z', 'qw', 'qx', 'qy', 'qz', 'gripper'];
+    const EE_FIELDS = [
+        'observation.ee_left',
+        'observation.ee_right',
+        'action.ee_left',
+        'action.ee_right',
+    ];
+    const eePresent = EE_FIELDS.filter(key => frames[0]?.[key] != null);
+
+    const eeInfoSpan = eePresent.length
+        ? `<span>${eePresent.length} EE field${eePresent.length > 1 ? 's' : ''}</span>`
+        : '';
+
+    let chartsHtml = `
         <div class="charts-grid">
             <div class="chart-wrap">
                 <div class="chart-title">observation.state — ${stateDim} dims</div>
@@ -538,6 +546,30 @@ function renderPreview(frames) {
                 <div class="chart-cj-container"><canvas id="chart-action"></canvas></div>
             </div>
         </div>`;
+
+    if (eePresent.length) {
+        chartsHtml += `<div class="charts-section-label">End-Effector</div><div class="charts-grid">`;
+        for (const key of eePresent) {
+            const safeId = 'chart-' + key.replace(/\./g, '-');
+            const dim = frames[0][key]?.length ?? 0;
+            chartsHtml += `
+                <div class="chart-wrap">
+                    <div class="chart-title">${key} — ${dim} dims</div>
+                    <div class="chart-cj-container"><canvas id="${safeId}"></canvas></div>
+                </div>`;
+        }
+        chartsHtml += `</div>`;
+    }
+
+    const body = document.getElementById('preview-body');
+    body.innerHTML = `
+        <div class="preview-info">
+            <span>${frames.length} frames</span>
+            <span>state ${stateDim}D</span>
+            <span>action ${actionDim}D</span>
+            ${eeInfoSpan}
+        </div>
+        ${chartsHtml}`;
 
     if (stateData.length  > 1) {
         const c = makeWizardChart(
@@ -552,6 +584,17 @@ function renderPreview(frames) {
             'action'
         );
         if (c) _previewCharts.push(c);
+    }
+
+    for (const key of eePresent) {
+        const safeId = 'chart-' + key.replace(/\./g, '-');
+        const eeData = frames.map(f => f[key]).filter(Boolean);
+        if (eeData.length > 1) {
+            const dim   = eeData[0]?.length ?? 0;
+            const names = EE_DIM_NAMES.slice(0, dim);
+            const c = makeWizardChart(document.getElementById(safeId), eeData, names, key);
+            if (c) _previewCharts.push(c);
+        }
     }
 }
 

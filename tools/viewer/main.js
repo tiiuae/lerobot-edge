@@ -16,15 +16,16 @@
  */
 
 import { S } from './js/state.js';
-import { setupJointScene, setupEEScene, setupCameraSync, animate } from './js/scene.js';
+import { setupJointScene, setupEEScene, setupCameraSync, animate, snapCamera } from './js/scene.js';
 import { loadRobot } from './js/robot.js';
 import { buildSecondaryTrajectories } from './js/overlays.js';
 import { setupModeButtons } from './js/modes.js';
 import { setupCalibrationUI } from './js/calibration.js';
 import { setupDataPanel } from './js/datapanel.js';
 import { setupGraphPanel } from './js/graphs.js';
+import { setupSettingsPanel } from './js/settings.js';
 import { updateFrame, startPlayback, stopPlayback, setStatus } from './js/playback.js';
-import { loadDatasets } from './js/api.js';
+import { loadDatasets, initDatasetBrowser } from './js/api.js';
 
 async function init() {
   setupJointScene();
@@ -34,7 +35,13 @@ async function init() {
   setupCalibrationUI();
   setupDataPanel();
   setupGraphPanel();
+  setupSettingsPanel();
   animate();
+
+  // Camera view preset buttons (present in both panels)
+  document.querySelectorAll('.cam-btn').forEach(btn => {
+    btn.addEventListener('click', () => snapCamera(btn.dataset.view));
+  });
 
   document.getElementById('playBtn').addEventListener('click', () =>
     S.playing ? stopPlayback() : startPlayback());
@@ -49,6 +56,7 @@ async function init() {
   helpOverlay.addEventListener('click', e => { if (e.target === helpOverlay) helpOverlay.classList.add('hidden'); });
 
   setStatus('Loading datasets…');
+  initDatasetBrowser();
   await loadDatasets();
 
   setStatus('Loading robot model…');
