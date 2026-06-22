@@ -3,6 +3,9 @@
 import * as THREE        from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { ColladaLoader }  from 'three/examples/jsm/loaders/ColladaLoader.js';
+import { Line2 }         from 'three/addons/lines/Line2.js';
+import { LineGeometry }  from 'three/addons/lines/LineGeometry.js';
+import { LineMaterial }  from 'three/addons/lines/LineMaterial.js';
 import URDFLoader         from 'urdf-loader';
 import * as K from './constants.js';
 import { VC } from './vis-config.js';
@@ -96,11 +99,24 @@ export function makeAxisFrame(size, colors) {
   return g;
 }
 
+// Tracks all active LineMaterial instances so syncSize can update their resolution.
+export const trailMaterials = new Set();
+
 export function makeLine(points, color, opacity) {
-  return new THREE.Line(
-    new THREE.BufferGeometry().setFromPoints(points),
-    new THREE.LineBasicMaterial({ color, opacity, transparent: opacity < 1 })
-  );
+  if (points.length < 2) return null;
+  const geo = new LineGeometry();
+  geo.setPositions(points.flatMap(p => [p.x, p.y, p.z]));
+  const mat = new LineMaterial({
+    color: new THREE.Color(color),
+    opacity,
+    transparent: opacity < 1,
+    linewidth: VC.trailLineWidth,
+    resolution: new THREE.Vector2(window.innerWidth, window.innerHeight),
+  });
+  trailMaterials.add(mat);
+  const line = new Line2(geo, mat);
+  line.frustumCulled = false;
+  return line;
 }
 
 export function makeUpdatableLine(color) {
@@ -110,6 +126,11 @@ export function makeUpdatableLine(color) {
   const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color }));
   line.visible = false;
   return line;
+}
+
+export function applySphereScale(scale) {
+  for (const m of [jObsLeftMark, jObsRightMark, eeObsLeftMark, eeObsRightMark, eeSecLeftMark, eeSecRightMark])
+    if (m) m.scale.setScalar(scale);
 }
 
 export function setLinePoints(line, a, b) {
@@ -155,6 +176,8 @@ export function setupJointScene() {
   const sGeo = new THREE.SphereGeometry(0.016, 10, 10);
   jObsLeftMark  = new THREE.Mesh(sGeo, new THREE.MeshPhongMaterial({ color: K.C_OBS_L, emissive: 0x112244 }));
   jObsRightMark = new THREE.Mesh(sGeo, new THREE.MeshPhongMaterial({ color: K.C_OBS_R, emissive: 0x441108 }));
+  jObsLeftMark.scale.setScalar(VC.sphereScale);
+  jObsRightMark.scale.setScalar(VC.sphereScale);
   jRosRoot.add(jObsLeftMark, jObsRightMark);
   jObsLeftMark.visible = jObsRightMark.visible = false;
 }
@@ -196,6 +219,8 @@ export function setupEEScene() {
   const sObs = new THREE.SphereGeometry(0.020, 12, 12);
   eeObsLeftMark  = new THREE.Mesh(sObs, new THREE.MeshPhongMaterial({ color: K.C_OBS_L, emissive: 0x112244 }));
   eeObsRightMark = new THREE.Mesh(sObs, new THREE.MeshPhongMaterial({ color: K.C_OBS_R, emissive: 0x441108 }));
+  eeObsLeftMark.scale.setScalar(VC.sphereScale);
+  eeObsRightMark.scale.setScalar(VC.sphereScale);
   eRosRoot.add(eeObsLeftMark, eeObsRightMark);
   eeObsLeftMark.visible = eeObsRightMark.visible = false;
 
@@ -203,6 +228,8 @@ export function setupEEScene() {
   const sSec = new THREE.SphereGeometry(0.014, 10, 10);
   eeSecLeftMark  = new THREE.Mesh(sSec, new THREE.MeshPhongMaterial({ color: K.C_SEC_L, emissive: 0x003344 }));
   eeSecRightMark = new THREE.Mesh(sSec, new THREE.MeshPhongMaterial({ color: K.C_SEC_R, emissive: 0x331100 }));
+  eeSecLeftMark.scale.setScalar(VC.sphereScale);
+  eeSecRightMark.scale.setScalar(VC.sphereScale);
   eRosRoot.add(eeSecLeftMark, eeSecRightMark);
   eeSecLeftMark.visible = eeSecRightMark.visible = false;
 
@@ -231,10 +258,10 @@ export function snapCamera(view) {
   const presets = {
     top:    [t.x,       t.y - 0.5, t.z + D],
     bottom: [t.x,       t.y - 0.5, t.z - D],
-    front:  [t.x,       t.y - D,   t.z    ],
-    back:   [t.x,       t.y + D,   t.z    ],
-    left:   [t.x + D,   t.y,       t.z    ],
-    right:  [t.x - D,   t.y,       t.z    ],
+    front:  [t.x + D,   t.y,       t.z    ],
+    back:   [t.x - D,   t.y,       t.z    ],
+    left:   [t.x,       t.y + D,   t.z    ],
+    right:  [t.x,       t.y - D,   t.z    ],
     iso:    [t.x + 3.0, t.y - 3.5, t.z + 2.0],
   };
   const pos = presets[view];
@@ -270,6 +297,7 @@ export function syncSize(renderer, camera, canvas) {
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    for (const mat of trailMaterials) mat.resolution.set(w, h);
   }
 }
 

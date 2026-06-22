@@ -3,7 +3,7 @@
 import { VC, saveVC, resetVC } from './vis-config.js';
 import { buildObsTrajectories, buildSecondaryTrajectories } from './overlays.js';
 import { buildGraphCharts } from './graphs.js';
-import { jScene, eScene } from './scene.js';
+import { jScene, eScene, applySphereScale } from './scene.js';
 import { makeDraggable } from './calibration.js';
 
 export function setupSettingsPanel() {
@@ -22,15 +22,19 @@ export function setupSettingsPanel() {
   makeDraggable(panel, panel.querySelector('.settings-hdr'));
 
   // Populate inputs with persisted values
-  set('vc-bg-color',          VC.bgColor);
-  set('vc-obs-l',             VC.trailObsLColor);
-  set('vc-obs-r',             VC.trailObsRColor);
-  set('vc-sec-l',             VC.trailSecLColor);
-  set('vc-sec-r',             VC.trailSecRColor);
-  set('vc-opacity',           VC.trailOpacity);
-  set('vc-chart-width',       VC.chartBorderWidth);
-  setTxt('vc-opacity-val',    VC.trailOpacity.toFixed(2));
-  setTxt('vc-chart-width-val',VC.chartBorderWidth.toFixed(1));
+  set('vc-bg-color',           VC.bgColor);
+  set('vc-obs-l',              VC.trailObsLColor);
+  set('vc-obs-r',              VC.trailObsRColor);
+  set('vc-sec-l',              VC.trailSecLColor);
+  set('vc-sec-r',              VC.trailSecRColor);
+  set('vc-opacity',            VC.trailOpacity);
+  set('vc-trail-width',        VC.trailLineWidth);
+  set('vc-sphere-scale',       VC.sphereScale);
+  set('vc-chart-width',        VC.chartBorderWidth);
+  setTxt('vc-opacity-val',     VC.trailOpacity.toFixed(2));
+  setTxt('vc-trail-width-val', VC.trailLineWidth.toFixed(1));
+  setTxt('vc-sphere-scale-val',VC.sphereScale.toFixed(1));
+  setTxt('vc-chart-width-val', VC.chartBorderWidth.toFixed(1));
 
   wire('vc-bg-color', v => {
     VC.bgColor = v;
@@ -51,6 +55,21 @@ export function setupSettingsPanel() {
     saveVC();
   });
 
+  wire('vc-trail-width', v => {
+    VC.trailLineWidth = +v;
+    setTxt('vc-trail-width-val', (+v).toFixed(1));
+    buildObsTrajectories();
+    buildSecondaryTrajectories();
+    saveVC();
+  });
+
+  wire('vc-sphere-scale', v => {
+    VC.sphereScale = +v;
+    setTxt('vc-sphere-scale-val', (+v).toFixed(1));
+    applySphereScale(+v);
+    saveVC();
+  });
+
   wire('vc-chart-width', v => {
     VC.chartBorderWidth = +v;
     setTxt('vc-chart-width-val', (+v).toFixed(1));
@@ -60,16 +79,21 @@ export function setupSettingsPanel() {
 
   document.getElementById('vcResetBtn').addEventListener('click', () => {
     resetVC();
-    set('vc-bg-color',          VC.bgColor);
-    set('vc-obs-l',             VC.trailObsLColor);
-    set('vc-obs-r',             VC.trailObsRColor);
-    set('vc-sec-l',             VC.trailSecLColor);
-    set('vc-sec-r',             VC.trailSecRColor);
-    set('vc-opacity',           VC.trailOpacity);
-    set('vc-chart-width',       VC.chartBorderWidth);
-    setTxt('vc-opacity-val',    VC.trailOpacity.toFixed(2));
-    setTxt('vc-chart-width-val',VC.chartBorderWidth.toFixed(1));
+    set('vc-bg-color',           VC.bgColor);
+    set('vc-obs-l',              VC.trailObsLColor);
+    set('vc-obs-r',              VC.trailObsRColor);
+    set('vc-sec-l',              VC.trailSecLColor);
+    set('vc-sec-r',              VC.trailSecRColor);
+    set('vc-opacity',            VC.trailOpacity);
+    set('vc-trail-width',        VC.trailLineWidth);
+    set('vc-sphere-scale',       VC.sphereScale);
+    set('vc-chart-width',        VC.chartBorderWidth);
+    setTxt('vc-opacity-val',     VC.trailOpacity.toFixed(2));
+    setTxt('vc-trail-width-val', VC.trailLineWidth.toFixed(1));
+    setTxt('vc-sphere-scale-val',VC.sphereScale.toFixed(1));
+    setTxt('vc-chart-width-val', VC.chartBorderWidth.toFixed(1));
     applyBg(VC.bgColor);
+    applySphereScale(VC.sphereScale);
     buildObsTrajectories();
     buildSecondaryTrajectories();
     buildGraphCharts();

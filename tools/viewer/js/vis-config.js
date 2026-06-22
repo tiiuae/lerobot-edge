@@ -9,6 +9,8 @@ const DEFAULTS = {
   trailSecLColor:   '#00bbdd',
   trailSecRColor:   '#dd7700',
   trailOpacity:     0.6,
+  trailLineWidth:   2,
+  sphereScale:      1.0,
   chartBorderWidth: 1.2,
 };
 

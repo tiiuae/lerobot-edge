@@ -14,7 +14,7 @@ import {
   eeSecLeftMark, eeSecRightMark,
   errLeftLine, errRightLine,
   arrowLeft, arrowRight,
-  sceneRefs,
+  sceneRefs, trailMaterials,
   makeLine, setLinePoints, updateArrow,
 } from './scene.js';
 
@@ -41,7 +41,10 @@ export function posV3(pose7) {
 
 // ── Trajectory builders ───────────────────────────────────────────────────────
 export function clearTrail(trail, root) {
-  if (trail) root.remove(trail);
+  if (trail) {
+    if (trail.material) trailMaterials.delete(trail.material);
+    root.remove(trail);
+  }
   return null;
 }
 
