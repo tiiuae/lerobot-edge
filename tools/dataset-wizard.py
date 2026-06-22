@@ -23,6 +23,7 @@ import json
 import os
 import shutil
 import sys
+import time
 import zipfile
 from pathlib import Path
 
@@ -337,16 +338,25 @@ if should_run("upload"):
         f"  Uploading [bold]{zip_path.name}[/] → [dim]{remote_file}[/]  ({total_mb:.1f} MB)\n"
     )
 
+    upload_start = [time.monotonic()]
     last_pct = [0]
 
     def _cb(transferred: int, total: int):
         pct = int(transferred / total * 100)
         if pct >= last_pct[0] + 5 or transferred == total:
-            mb     = transferred / 1024**2
+            elapsed = time.monotonic() - upload_start[0]
+            mb = transferred / 1024**2
+            speed_str = f"{mb / elapsed:.1f} MB/s" if elapsed > 0 else "—"
+            if elapsed > 0 and transferred < total:
+                eta_sec = (total - transferred) / (transferred / elapsed)
+                eta_str = f"  eta {int(eta_sec // 60)}m {int(eta_sec % 60):02d}s"
+            else:
+                eta_str = ""
             filled = int(30 * transferred / total)
             bar    = "█" * filled + "░" * (30 - filled)
             console.print(
-                f"  [[[cyan]{bar}[/cyan]] [cyan]{pct:3d}%[/]  {mb:.1f}/{total_mb:.1f} MB"
+                f"  [[[cyan]{bar}[/cyan]] [cyan]{pct:3d}%[/]  "
+                f"{mb:.1f}/{total_mb:.1f} MB  [dim]{speed_str}{eta_str}[/]"
             )
             last_pct[0] = pct
 

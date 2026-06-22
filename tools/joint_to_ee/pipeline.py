@@ -4,9 +4,10 @@ import shutil
 import tempfile
 from pathlib import Path
 
+import time
+
 import pyarrow.parquet as pq
 from rich.console import Console
-from rich.progress import track
 
 from . import constants as C
 from .enrich import enrich_table
@@ -64,12 +65,26 @@ def process_dataset(dataset_root: Path, output_root: Path, ref_frame: str,
         shutil.copytree(dataset_root, output_root, dirs_exist_ok=False)
         work_root = output_root
 
-    for pq_src in track(pq_files, description=f"  Enriching {len(pq_files)} parquet file(s)…"):
+    n = len(pq_files)
+    console.print(f"  Enriching {n} parquet file(s)…")
+    t0 = time.monotonic()
+    last_pct = -1
+    for i, pq_src in enumerate(pq_files, 1):
         pq_dst = work_root / pq_src.relative_to(dataset_root)
         tbl = pq.read_table(pq_src)
         tbl = enrich_table(tbl, kin, left_mount, right_mount,
                            include_joint_repr=include_joint_repr, rot_repr=rot_repr)
         pq.write_table(tbl, pq_dst)
+        pct = int(i / n * 100)
+        if pct != last_pct and (pct % 10 == 0 or i == n):
+            elapsed = time.monotonic() - t0
+            if i < n and elapsed > 0:
+                eta_sec = elapsed / i * (n - i)
+                eta_str = f"  eta {int(eta_sec // 60)}m {int(eta_sec % 60):02d}s"
+            else:
+                eta_str = ""
+            console.print(f"  [{i}/{n}] {pct}%{eta_str}")
+            last_pct = pct
 
     update_info_json(work_root / "meta" / "info.json",
                      include_joint_repr=include_joint_repr, ref_frame=ref_frame,
