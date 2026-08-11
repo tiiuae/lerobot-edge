@@ -33,7 +33,7 @@ import cv2  # type: ignore  # TODO: add type stubs for OpenCV
 import numpy as np  # type: ignore  # TODO: add type stubs for numpy
 
 from lerobot.utils.decorators import check_if_not_connected
-from lerobot.utils.import_utils import _reachy2_sdk_available
+from lerobot.utils.import_utils import _reachy2_sdk_available, require_package
 
 if TYPE_CHECKING or _reachy2_sdk_available:
     from reachy2_sdk.media.camera import CameraView
@@ -76,6 +76,7 @@ class Reachy2Camera(Camera):
         Args:
             config: The configuration settings for the camera.
         """
+        require_package("reachy2_sdk", extra="reachy2")
         super().__init__(config)
 
         self.config = config
@@ -172,7 +173,8 @@ class Reachy2Camera(Camera):
             raise ValueError(
                 f"Invalid color mode '{self.color_mode}'. Expected {ColorMode.RGB} or {ColorMode.BGR}."
             )
-        if self.color_mode == ColorMode.RGB:
+        is_depth_frame = self.config.name == "depth" and self.config.image_type == "depth"
+        if not is_depth_frame and self.color_mode == ColorMode.RGB:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
         self.latest_frame = frame
@@ -201,7 +203,7 @@ class Reachy2Camera(Camera):
         return self.read()
 
     @check_if_not_connected
-    def read_latest(self, max_age_ms: int = 1000) -> NDArray[Any]:
+    def read_latest(self, max_age_ms: int = 500) -> NDArray[Any]:
         """Return the most recent frame captured immediately (Peeking).
 
         This method is non-blocking and returns whatever is currently in the

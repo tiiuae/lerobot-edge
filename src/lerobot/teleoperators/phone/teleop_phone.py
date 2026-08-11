@@ -21,15 +21,26 @@
 import logging
 import threading
 import time
+from typing import TYPE_CHECKING
 
-import hebi
 import numpy as np
-from teleop import Teleop
 
-from lerobot.teleoperators.phone.config_phone import PhoneConfig, PhoneOS
-from lerobot.teleoperators.teleoperator import Teleoperator
 from lerobot.utils.decorators import check_if_already_connected, check_if_not_connected
+from lerobot.utils.import_utils import _hebi_available, _teleop_available, require_package
 from lerobot.utils.rotation import Rotation
+
+if TYPE_CHECKING or _hebi_available:
+    import hebi
+else:
+    hebi = None
+
+if TYPE_CHECKING or _teleop_available:
+    from teleop import Teleop
+else:
+    Teleop = None
+
+from ..teleoperator import Teleoperator
+from .config_phone import PhoneConfig, PhoneOS
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +84,8 @@ class IOSPhone(BasePhone, Teleoperator):
     name = "ios_phone"
 
     def __init__(self, config: PhoneConfig):
+        require_package("hebi-py", extra="phone", import_name="hebi")
+        require_package("teleop", extra="phone")
         super().__init__(config)
         self.config = config
         self._group = None
@@ -158,7 +171,13 @@ class IOSPhone(BasePhone, Teleoperator):
         # HEBI provides orientation in w, x, y, z format.
         # Scipy's Rotation expects x, y, z, w.
         quat_xyzw = np.concatenate((ar_quat[1:], [ar_quat[0]]))  # wxyz to xyzw
-        rot = Rotation.from_quat(quat_xyzw)
+        # ARKit can emit zero/NaN quaternions before tracking is ready or on a
+        # dropped packet. Rotation.from_quat now rejects those; degrade the same
+        # way as a missing pose so teleop stays alive mid-session.
+        try:
+            rot = Rotation.from_quat(quat_xyzw)
+        except ValueError:
+            return False, None, None, None
         pos = ar_pos - rot.apply(self.config.camera_offset)
         return True, pos, rot, pose
 
@@ -212,6 +231,8 @@ class AndroidPhone(BasePhone, Teleoperator):
     name = "android_phone"
 
     def __init__(self, config: PhoneConfig):
+        require_package("hebi-py", extra="phone", import_name="hebi")
+        require_package("teleop", extra="phone")
         super().__init__(config)
         self.config = config
         self._teleop = None

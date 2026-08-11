@@ -18,7 +18,7 @@ import numpy as np
 import pytest
 import torch
 
-from lerobot.processor import TransitionKey
+from lerobot.lerobot_types import TransitionKey
 from lerobot.processor.converters import (
     batch_to_transition,
     create_transition,

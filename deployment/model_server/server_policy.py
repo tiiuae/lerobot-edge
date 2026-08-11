@@ -1,6 +1,7 @@
 # Copyright 2026. Licensed under the MIT License.
 # AIDRC pi0.5 policy server — websocket front-end for the fixed deployment
 # contract documented with the August 2026 checkpoint.
+"""Serve the fixed AIDRC pi0.5 checkpoint through the OpenPI websocket protocol."""
 
 import argparse
 import json
@@ -45,8 +46,7 @@ _RIGHT_ARM_ACTION_SLICE = slice(7, 14)
 
 
 class PolicyServer:
-    """
-    Fixed adapter between the Trossen OpenPI client and the AIDRC pi0.5 policy.
+    """Fixed adapter between the Trossen OpenPI client and the AIDRC pi0.5 policy.
 
     Responsibilities:
       1. Observation adaptation  — translates the openpi-client format
@@ -82,6 +82,7 @@ class PolicyServer:
         postprocessor,
         debug_dir: str | None = None,
     ) -> None:
+        """Initialize the fixed policy adapter and optional debug image logger."""
         self._policy = policy
         self._preprocessor = preprocessor
         self._postprocessor = postprocessor
@@ -131,7 +132,7 @@ class PolicyServer:
         The client has already stretched a 640x480 frame to 224x224. Resizing
         that square content to 224x168 and padding it recreates the geometry
         that pi0.5's native ``resize_with_pad_torch`` would have produced from
-        the original frame. LeRobot pads float images with -1.0 before its
+        the original frame. LeRobot 0.6.2 pads float images with 0.0 before its
         model normalization, so the same value is used here. This is only
         applied to square wire images whose saved feature shape is non-square.
         """
@@ -155,7 +156,7 @@ class PolicyServer:
         pad_h1 = pad_h0 + remainder_h
         pad_w0, remainder_w = divmod(output_w - resized_w, 2)
         pad_w1 = pad_w0 + remainder_w
-        restored = torch.nn.functional.pad(resized, (pad_w0, pad_w1, pad_h0, pad_h1), value=-1.0)
+        restored = torch.nn.functional.pad(resized, (pad_w0, pad_w1, pad_h0, pad_h1), value=0.0)
         logging.debug(
             "Restored %s aspect ratio: wire=%sx%s, training=%sx%s, model=%sx%s",
             feature_key,
@@ -187,7 +188,7 @@ class PolicyServer:
         return t.unsqueeze(0).contiguous()
 
     def _adapt_example(self, ex: dict) -> dict:
-        """openpi client format → lerobot Observation dict."""
+        """Convert the OpenPI client format to a LeRobot observation dictionary."""
         observation: dict = {}
 
         images_dict = ex.get("images", {}) or {}
@@ -232,10 +233,10 @@ class PolicyServer:
         manifest = {
             "call_idx": self._call_idx,
             "image_convention": (
-                "RGB CHW float32; content is [0,1] and padding is -1, matching "
+                "RGB CHW float32 [0,1] with padding 0, matching "
                 "LeRobot pi0.5's native resize_with_pad_torch before model normalization"
             ),
-            "png_visualization": "Negative padding is clamped to black in the saved PNG files.",
+            "png_visualization": "The saved PNG shows the exact RGB tensor passed to preprocessing.",
             "client_color_space": "bgr",
             "images": {},
         }
@@ -271,7 +272,7 @@ class PolicyServer:
 
     @torch.no_grad()
     def _run_pipeline(self, observation: dict) -> np.ndarray:
-        """preprocessor → policy.predict_action_chunk → postprocessor → (T, D) ndarray."""
+        """Run preprocessing, chunk prediction, and postprocessing into a (T, D) array."""
         observation = self._preprocessor(observation)
 
         chunk = self._policy.predict_action_chunk(observation)  # (B, T, D) or (B, D)
@@ -309,6 +310,7 @@ class PolicyServer:
     # ------------------------------------------------------------------
 
     def predict_action(self, examples=None, **kwargs) -> dict:
+        """Predict one fixed-horizon right-arm action chunk for a client observation."""
         if examples is None:
             examples = []
         if not isinstance(examples, list):
@@ -339,6 +341,7 @@ class PolicyServer:
         return {"actions": actions}
 
     def reset(self) -> None:
+        """Reset the wrapped policy and debug call counter."""
         if hasattr(self._policy, "reset"):
             self._policy.reset()
         self._call_idx = 0
@@ -417,6 +420,7 @@ def _validate_checkpoint_files(checkpoint: Path) -> None:
 
 
 def main(args) -> None:
+    """Load the fixed checkpoint and serve it until the websocket server exits."""
     checkpoint = Path(args.ckpt_path).expanduser().resolve(strict=True)
     if not checkpoint.is_dir():
         raise NotADirectoryError(f"Checkpoint path is not a directory: {checkpoint}")
@@ -466,6 +470,7 @@ def main(args) -> None:
 
 
 def build_argparser():
+    """Build the command-line parser for the fixed deployment server."""
     p = argparse.ArgumentParser(description="Serve the fixed AIDRC pi0.5 deployment checkpoint.")
     p.add_argument(
         "--ckpt_path",
