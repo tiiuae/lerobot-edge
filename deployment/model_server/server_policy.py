@@ -1,12 +1,10 @@
-# Copyright 2026. Licensed under the MIT License.
-# AIDRC pi0.5 policy server — websocket front-end for the fixed deployment
-# contract documented with the August 2026 checkpoint.
-"""Serve the fixed AIDRC pi0.5 checkpoint through the OpenPI websocket protocol."""
+
 
 import argparse
 import json
 import logging
 import socket
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -14,8 +12,10 @@ import torch
 from PIL import Image as _PIL_Image
 
 from deployment.model_server.tools.websocket_policy_server import WebsocketPolicyServer
+from lerobot.configs import RTCAttentionSchedule
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.policies.factory import get_policy_class, make_pre_post_processors
+from lerobot.policies.rtc import RTCConfig
 from lerobot.utils.constants import OBS_IMAGES, OBS_STATE
 
 # ANSI colour helpers
@@ -35,9 +35,15 @@ _IMAGE_FEATURES = {
     "observation.images.secondary": (3, 480, 640),
     "observation.images.wrist": (3, 480, 640),
 }
-_POLICY_STATE_DIM = 19
-_POLICY_ACTION_DIM = 16
+_CHECKPOINT_STATE_DIM = 19
+_CHECKPOINT_ACTION_DIM = 16
+_CLIENT_STATE_DIM = 14
+_CLIENT_ACTION_DIM = 14
+_STATIONARY_BASE_STATE_DIM = 5
+_LEFT_ARM_SLICE = slice(0, 7)
 _RIGHT_ARM_ACTION_SLICE = slice(7, 14)
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+_REPOSITORY_DEBUG_ROOT = _REPOSITORY_ROOT / "logs" / "pi05_debug"
 
 
 # ---------------------------------------------------------------------------
@@ -46,7 +52,8 @@ _RIGHT_ARM_ACTION_SLICE = slice(7, 14)
 
 
 class PolicyServer:
-    """Fixed adapter between the Trossen OpenPI client and the AIDRC pi0.5 policy.
+    """
+    Fixed adapter between the Trossen OpenPI client and the AIDRC pi0.5 policy.
 
     Responsibilities:
       1. Observation adaptation  — translates the openpi-client format
@@ -60,9 +67,12 @@ class PolicyServer:
       3. Action post-processing  — returns `{"actions": (T, D)}` numpy.
       4. Coloured action logging — prints every predicted chunk to stdout.
       5. Debug I/O saving        — optional (pass debug_dir=None to skip).
-                                   Saved per call under <debug_dir>/call_<N>/:
+                                   Saved per call under
+                                   <debug_dir>/run_<timestamp>/call_<N>/:
                                      instruction.txt
                                      image_<camera>.png
+                                     proprio.npy
+                                     input_state.npy
                                      input_debug.json
                                      output_actions.npy
                                      output_debug.json
@@ -81,8 +91,8 @@ class PolicyServer:
         preprocessor,
         postprocessor,
         debug_dir: str | None = None,
+        rtc_inference_delay: int = 0,
     ) -> None:
-        """Initialize the fixed policy adapter and optional debug image logger."""
         self._policy = policy
         self._preprocessor = preprocessor
         self._postprocessor = postprocessor
@@ -90,6 +100,22 @@ class PolicyServer:
         self._device = next(policy.parameters()).device
         self._debug = debug_dir is not None
         self._call_idx = 0
+        self._debug_idx = 0
+        self._rtc_config = getattr(policy.config, "rtc_config", None)
+        self._rtc_inference_delay = rtc_inference_delay
+        self._previous_action_chunk: torch.Tensor | None = None
+
+        if self._rtc_config is not None and self._rtc_config.enabled:
+            if rtc_inference_delay < 0:
+                raise ValueError("rtc_inference_delay must be non-negative")
+            logging.info(
+                "RTC enabled: inference_delay=%d, execution_horizon=%d, "
+                "max_guidance_weight=%.2f, prefix_attention_schedule=%s",
+                rtc_inference_delay,
+                self._rtc_config.execution_horizon,
+                self._rtc_config.max_guidance_weight,
+                self._rtc_config.prefix_attention_schedule.value,
+            )
 
         self._image_shapes = dict(_IMAGE_FEATURES)
         self._model_image_size = (224, 224)
@@ -99,13 +125,21 @@ class PolicyServer:
             self._camera_map,
         )
         logging.info(
-            "Image path: Trossen BGR -> RGB CHW float32, with the square resize corrected "
-            "to LeRobot pi0.5's native 4:3 letterboxed geometry and padding value."
+            "Image path: Trossen BGR -> RGB CHW float32 [0, 1], with the square resize "
+            "corrected to the checkpoint's 4:3 letterboxed geometry."
         )
 
         if self._debug:
-            self._debug_dir = Path(debug_dir)
-            self._debug_dir.mkdir(parents=True, exist_ok=True)
+            debug_root = Path(debug_dir).expanduser()
+            run_name = datetime.now(UTC).strftime("run_%Y%m%dT%H%M%S_%fZ")
+            self._debug_dir = debug_root / run_name
+            try:
+                self._debug_dir.mkdir(parents=True, exist_ok=False)
+            except OSError as exc:
+                raise OSError(
+                    f"Could not create a debug run directory under {debug_root}: {exc}. "
+                    f"Use --debug_dir {_REPOSITORY_DEBUG_ROOT}"
+                ) from exc
             logging.info("PolicyServer: debug I/O → %s", self._debug_dir)
 
     # ------------------------------------------------------------------
@@ -131,10 +165,9 @@ class PolicyServer:
 
         The client has already stretched a 640x480 frame to 224x224. Resizing
         that square content to 224x168 and padding it recreates the geometry
-        that pi0.5's native ``resize_with_pad_torch`` would have produced from
-        the original frame. LeRobot 0.6.2 pads float images with 0.0 before its
-        model normalization, so the same value is used here. This is only
-        applied to square wire images whose saved feature shape is non-square.
+        that pi0.5's native resize-with-padding would have produced from the
+        original frame. This is only applied to square wire images whose saved
+        feature shape is non-square.
         """
         feature_shape = self._image_shapes[feature_key]
         _, expected_h, expected_w = feature_shape
@@ -188,7 +221,7 @@ class PolicyServer:
         return t.unsqueeze(0).contiguous()
 
     def _adapt_example(self, ex: dict) -> dict:
-        """Convert the OpenPI client format to a LeRobot observation dictionary."""
+        """openpi client format → lerobot Observation dict."""
         observation: dict = {}
 
         images_dict = ex.get("images", {}) or {}
@@ -214,7 +247,19 @@ class PolicyServer:
             raise ValueError(f"AIDRC server requires one state vector, got {tuple(s.shape)}")
         if not torch.isfinite(s).all():
             raise ValueError("AIDRC arm state contains NaN or infinite values")
-        observation[OBS_STATE] = s
+        if s.shape[1] != _CLIENT_STATE_DIM:
+            raise ValueError(
+                f"OpenPI must send {_CLIENT_STATE_DIM} arm-state values; got {s.shape[1]}"
+            )
+
+        # The checkpoint was trained on left7 + right7 + five mobile-base
+        # fields. This deployment is stationary, so append fixed zero odometry
+        # and velocity values rather than asking the OpenPI client to send them.
+        stationary_base = s.new_zeros((s.shape[0], _STATIONARY_BASE_STATE_DIM))
+        model_state = torch.cat((s, stationary_base), dim=1)
+        if model_state.shape[1] != _CHECKPOINT_STATE_DIM:
+            raise RuntimeError(f"Internal AIDRC state mapping produced {tuple(model_state.shape)}")
+        observation[OBS_STATE] = model_state
 
         lang = ex.get("prompt") or ex.get("lang") or ex.get("task") or ""
         observation["task"] = lang
@@ -233,12 +278,27 @@ class PolicyServer:
         manifest = {
             "call_idx": self._call_idx,
             "image_convention": (
-                "RGB CHW float32 [0,1] with padding 0, matching "
-                "LeRobot pi0.5's native resize_with_pad_torch before model normalization"
+                "RGB CHW float32 [0,1], with geometry equivalent to pi0.5's "
+                "native 640x480-to-224x224 resize-with-padding"
             ),
-            "png_visualization": "The saved PNG shows the exact RGB tensor passed to preprocessing.",
             "client_color_space": "bgr",
             "images": {},
+        }
+        proprio = np.asarray(ex["state"]).copy()
+        np.save(call_dir / "proprio.npy", proprio)
+        manifest["proprio"] = {
+            "file": "proprio.npy",
+            "shape": list(proprio.shape),
+            "dtype": str(proprio.dtype),
+            "values": proprio.tolist(),
+        }
+        model_state = observation[OBS_STATE].detach().cpu().to(torch.float32)
+        np.save(call_dir / "input_state.npy", model_state.numpy())
+        manifest["model_state"] = {
+            "file": "input_state.npy",
+            "shape": list(model_state.shape),
+            "dtype": str(model_state.numpy().dtype),
+            "stationary_base_suffix": model_state[0, -_STATIONARY_BASE_STATE_DIM:].tolist(),
         }
         for feature_key, value in observation.items():
             if not feature_key.startswith(f"{OBS_IMAGES}."):
@@ -271,15 +331,60 @@ class PolicyServer:
     # ------------------------------------------------------------------
 
     @torch.no_grad()
-    def _run_pipeline(self, observation: dict) -> np.ndarray:
-        """Run preprocessing, chunk prediction, and postprocessing into a (T, D) array."""
+    def _run_pipeline(
+        self,
+        observation: dict,
+        *,
+        rtc_steps_executed: int = 0,
+        rtc_inference_delay: int | None = None,
+    ) -> np.ndarray:
+        """preprocessor → policy.predict_action_chunk → postprocessor → (T, D) ndarray."""
+        # Preserve the current left-arm pose before normalization. The model's
+        # left-arm predictions must not move the parked arm.
+        left_arm_hold = (
+            observation[OBS_STATE][0, _LEFT_ARM_SLICE].detach().cpu().to(torch.float32).numpy()
+        )
         observation = self._preprocessor(observation)
 
-        chunk = self._policy.predict_action_chunk(observation)  # (B, T, D) or (B, D)
+        predict_kwargs = {}
+        if self._rtc_config is not None and self._rtc_config.enabled:
+            if rtc_steps_executed < 0:
+                raise ValueError("rtc_steps_executed must be non-negative")
+            inference_delay = (
+                self._rtc_inference_delay
+                if rtc_inference_delay is None
+                else rtc_inference_delay
+            )
+            if inference_delay < 0:
+                raise ValueError("rtc_inference_delay must be non-negative")
+
+            prev_chunk_left_over = None
+            if self._previous_action_chunk is not None:
+                start = min(rtc_steps_executed, self._previous_action_chunk.shape[1])
+                end = min(
+                    start + self._rtc_config.execution_horizon,
+                    self._previous_action_chunk.shape[1],
+                )
+                prev_chunk_left_over = self._previous_action_chunk[:, start:end]
+                if prev_chunk_left_over.shape[1] == 0:
+                    prev_chunk_left_over = None
+
+            predict_kwargs = {
+                "inference_delay": inference_delay,
+                "prev_chunk_left_over": prev_chunk_left_over,
+            }
+
+        chunk = self._policy.predict_action_chunk(
+            observation, **predict_kwargs
+        )  # (B, T, D) or (B, D)
         if chunk.ndim != 3:
             chunk = chunk.unsqueeze(0)  # → (B, 1, D)
-        if chunk.shape != (1, 50, _POLICY_ACTION_DIM):
+        if chunk.shape != (1, 50, _CHECKPOINT_ACTION_DIM):
             raise ValueError(f"AIDRC checkpoint must return shape (1, 50, 16); got {tuple(chunk.shape)}")
+        if self._rtc_config is not None and self._rtc_config.enabled:
+            # Keep normalized model actions: RTC guidance runs before the
+            # action postprocessor/unnormalizer.
+            self._previous_action_chunk = chunk.detach().clone()
 
         # postprocessor expects (B, action_dim) per call
         _, horizon, _ = chunk.shape
@@ -288,10 +393,13 @@ class PolicyServer:
         actions = actions.detach().cpu().to(torch.float32).numpy()
         if not np.isfinite(actions).all():
             raise ValueError("AIDRC policy returned NaN or infinite actions")
-        # Only right-arm joints + gripper (documented dimensions 7:14) are
-        # actionable. The client receives exactly seven values and fills the
-        # parked left arm from its frozen pose.
-        return actions[:, _RIGHT_ARM_ACTION_SLICE]
+        # Send a homogeneous 14-joint action to OpenPI: hold the left arm at
+        # the measured input pose and use only the model's actionable right7.
+        left_actions = np.broadcast_to(left_arm_hold, (horizon, left_arm_hold.size)).copy()
+        client_actions = np.concatenate((left_actions, actions[:, _RIGHT_ARM_ACTION_SLICE]), axis=1)
+        if client_actions.shape != (horizon, _CLIENT_ACTION_DIM):
+            raise RuntimeError(f"Internal AIDRC action mapping produced {client_actions.shape}")
+        return client_actions
 
     # ------------------------------------------------------------------
     # 4. Coloured action print
@@ -310,7 +418,6 @@ class PolicyServer:
     # ------------------------------------------------------------------
 
     def predict_action(self, examples=None, **kwargs) -> dict:
-        """Predict one fixed-horizon right-arm action chunk for a client observation."""
         if examples is None:
             examples = []
         if not isinstance(examples, list):
@@ -325,12 +432,26 @@ class PolicyServer:
 
         # --- 2. (optional) save inputs ---
         if self._debug:
-            call_dir = self._debug_dir / f"call_{self._call_idx:05d}"
-            call_dir.mkdir(parents=True, exist_ok=True)
+            debug_idx = self._debug_idx
+            self._debug_idx += 1
+            call_dir = self._debug_dir / f"call_{debug_idx:05d}"
+            call_dir.mkdir(parents=True, exist_ok=False)
             self._save_inputs(call_dir, ex, observation)
 
         # --- 3. Run pipeline ---
-        actions = self._run_pipeline(observation)
+        rtc_steps_executed = kwargs.get(
+            "rtc_steps_executed", ex.get("rtc_steps_executed", 0)
+        )
+        rtc_inference_delay = kwargs.get(
+            "rtc_inference_delay", ex.get("rtc_inference_delay")
+        )
+        actions = self._run_pipeline(
+            observation,
+            rtc_steps_executed=int(rtc_steps_executed),
+            rtc_inference_delay=(
+                None if rtc_inference_delay is None else int(rtc_inference_delay)
+            ),
+        )
         self._print_actions(actions, self._call_idx)
 
         # --- 4. (optional) save outputs ---
@@ -341,9 +462,9 @@ class PolicyServer:
         return {"actions": actions}
 
     def reset(self) -> None:
-        """Reset the wrapped policy and debug call counter."""
         if hasattr(self._policy, "reset"):
             self._policy.reset()
+        self._previous_action_chunk = None
         self._call_idx = 0
 
 
@@ -378,11 +499,11 @@ def _validate_checkpoint_config(config) -> None:
         f"ordered image features must be {_IMAGE_FEATURES}, got {actual_images}",
     )
     require(
-        state_feature is not None and tuple(state_feature.shape) == (_POLICY_STATE_DIM,),
+        state_feature is not None and tuple(state_feature.shape) == (_CHECKPOINT_STATE_DIM,),
         "state feature must have shape (19,)",
     )
     require(
-        action_feature is not None and tuple(action_feature.shape) == (_POLICY_ACTION_DIM,),
+        action_feature is not None and tuple(action_feature.shape) == (_CHECKPOINT_ACTION_DIM,),
         "action feature must have shape (16,)",
     )
     require(getattr(config, "n_obs_steps", None) == 1, "n_obs_steps must be 1")
@@ -420,7 +541,6 @@ def _validate_checkpoint_files(checkpoint: Path) -> None:
 
 
 def main(args) -> None:
-    """Load the fixed checkpoint and serve it until the websocket server exits."""
     checkpoint = Path(args.ckpt_path).expanduser().resolve(strict=True)
     if not checkpoint.is_dir():
         raise NotADirectoryError(f"Checkpoint path is not a directory: {checkpoint}")
@@ -430,6 +550,22 @@ def main(args) -> None:
     config = PreTrainedConfig.from_pretrained(str(checkpoint))
     config.device = args.device
     _validate_checkpoint_config(config)
+
+    if args.rtc:
+        if not 0 <= args.rtc_inference_delay <= config.chunk_size:
+            raise ValueError(
+                f"rtc_inference_delay must be between 0 and {config.chunk_size}"
+            )
+        if not 1 <= args.rtc_execution_horizon <= config.chunk_size:
+            raise ValueError(
+                f"rtc_execution_horizon must be between 1 and {config.chunk_size}"
+            )
+        config.rtc_config = S(
+            enabled=True,
+            execution_horizon=args.rtc_execution_horizon,
+            max_guidance_weight=args.rtc_max_guidance_weight,
+            prefix_attention_schedule=RTCAttentionSchedule(args.rtc_attention_schedule),
+        )
 
     policy_class = get_policy_class("pi05")
     policy = policy_class.from_pretrained(str(checkpoint), config=config).to(args.device).eval()
@@ -444,6 +580,7 @@ def main(args) -> None:
         preprocessor=preprocessor,
         postprocessor=postprocessor,
         debug_dir=args.debug_dir,
+        rtc_inference_delay=args.rtc_inference_delay,
     )
 
     hostname = socket.gethostname()
@@ -460,9 +597,11 @@ def main(args) -> None:
             "policy_type": "pi05",
             "camera_map": _CAMERA_MAP,
             "client_color_space": "bgr",
-            "action_dim": 7,
+            "action_dim": _CLIENT_ACTION_DIM,
             "action_horizon": 50,
             "fps": 30,
+            "rtc_enabled": args.rtc,
+            "rtc_inference_delay": args.rtc_inference_delay if args.rtc else None,
         },
     )
     logging.info("server running ...")
@@ -470,7 +609,6 @@ def main(args) -> None:
 
 
 def build_argparser():
-    """Build the command-line parser for the fixed deployment server."""
     p = argparse.ArgumentParser(description="Serve the fixed AIDRC pi0.5 deployment checkpoint.")
     p.add_argument(
         "--ckpt_path",
@@ -487,7 +625,39 @@ def build_argparser():
         "--debug_dir",
         type=str,
         default=None,
-        help="Directory to save per-call debug artefacts. None disables.",
+        help=(
+            "Root directory for timestamped per-run image/action logs. "
+            f"Use {_REPOSITORY_DEBUG_ROOT}; omit to disable logging."
+        ),
+    )
+    p.add_argument(
+        "--rtc",
+        action="store_true",
+        help="Enable Real-Time Chunking for pi0.5 inference.",
+    )
+    p.add_argument(
+        "--rtc_inference_delay",
+        type=int,
+        default=4,
+        help="Estimated policy latency in 30 Hz control steps (default: 4).",
+    )
+    p.add_argument(
+        "--rtc_execution_horizon",
+        type=int,
+        default=10,
+        help="Number of previous-chunk steps used for RTC guidance (default: 10).",
+    )
+    p.add_argument(
+        "--rtc_max_guidance_weight",
+        type=float,
+        default=10.0,
+        help="RTC consistency guidance strength (default: 10.0).",
+    )
+    p.add_argument(
+        "--rtc_attention_schedule",
+        choices=[schedule.value for schedule in RTCAttentionSchedule],
+        default=RTCAttentionSchedule.EXP.value,
+        help="RTC prefix-attention blend schedule (default: EXP).",
     )
     return p
 
