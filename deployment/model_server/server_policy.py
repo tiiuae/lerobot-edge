@@ -6,6 +6,7 @@ import logging
 import queue
 import socket
 import threading
+import time
 from datetime import UTC, datetime
 from numbers import Integral
 from pathlib import Path
@@ -784,6 +785,41 @@ def _configure_rtc(config, args) -> None:
     )
 
 
+def _warmup_compiled_policy(policy_server: PolicyServer, *, two_views: bool) -> None:
+    """Run one synthetic request through the full pipeline before serving real traffic.
+
+    With --compile, torch.compile only traces/compiles on the first call to
+    sample_actions; without this, that multi-second (or longer, under
+    max-autotune) cost would land on whichever robot happens to send the
+    first real request instead of at startup.
+    """
+    camera_map = _CAMERA_MAP_2CAM if two_views else _CAMERA_MAP_3CAM
+    image_features = _IMAGE_FEATURES_2CAM if two_views else _IMAGE_FEATURES_3CAM
+    images = {
+        client_key: np.zeros(image_features[f"observation.images.{lerobot_name}"], dtype=np.uint8)
+        for client_key, lerobot_name in camera_map.items()
+    }
+    example = {
+        "images": images,
+        "state": np.zeros(_CLIENT_STATE_DIM, dtype=np.float32),
+        "prompt": "warmup",
+    }
+
+    was_debug = policy_server._debug  # noqa: SLF001
+    policy_server._debug = False  # noqa: SLF001
+    try:
+        started = time.monotonic()
+        policy_server.predict_action(examples=example)
+        elapsed = time.monotonic() - started
+        logging.info(
+            "Warmup inference done in %.2fs; subsequent requests reuse the compiled graph", elapsed
+        )
+    finally:
+        policy_server._debug = was_debug  # noqa: SLF001
+        # Drop the synthetic prompt/chunk/RTC state the warmup call left behind.
+        policy_server.reset()
+
+
 def main(args) -> None:
     two_views = args.two_views
     right_arm_7d = args.right_arm_7d
@@ -805,6 +841,14 @@ def main(args) -> None:
 
     _configure_rtc(config, args)
 
+    # torch.compile is a construction-time setting, unrelated to how the
+    # checkpoint was trained: PI05Pytorch.__init__ reads config.compile_model
+    # when it builds the model and wraps sample_actions/forward accordingly,
+    # before from_pretrained loads any weights into it.
+    config.compile_model = args.compile
+    if args.compile:
+        config.compile_mode = args.compile_mode
+
     policy_class = get_policy_class("pi05")
     policy = policy_class.from_pretrained(str(checkpoint), config=config).to(args.device).eval()
     preprocessor, postprocessor = make_pre_post_processors(
@@ -822,6 +866,9 @@ def main(args) -> None:
         two_views=two_views,
         right_arm_7d=right_arm_7d,
     )
+
+    if args.compile:
+        _warmup_compiled_policy(policy_server, two_views=two_views)
 
     hostname = socket.gethostname()
     local_ip = socket.gethostbyname(hostname)
@@ -880,6 +927,22 @@ def build_argparser():
             "Root directory for timestamped per-run image/action logs. "
             f"Use {_REPOSITORY_DEBUG_ROOT}; omit to disable logging."
         ),
+    )
+    p.add_argument(
+        "--compile",
+        action="store_true",
+        help="Wrap the model's inference path (sample_actions) in torch.compile. "
+        "Adds a one-time trace/compile cost, paid during startup warmup rather than "
+        "on the first real request, in exchange for faster steady-state inference.",
+    )
+    p.add_argument(
+        "--compile_mode",
+        type=str,
+        default="reduce-overhead",
+        help="torch.compile mode, only used with --compile (default: reduce-overhead, "
+        "which favors low per-call latency for this server's fixed-shape, batch-size-1 "
+        "requests; 'max-autotune' searches harder for a faster kernel at a much longer "
+        "compile time).",
     )
     p.add_argument(
         "--2_views",
