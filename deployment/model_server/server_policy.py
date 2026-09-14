@@ -1,5 +1,6 @@
+
+
 import argparse
-import contextlib
 import json
 import logging
 import queue
@@ -18,10 +19,6 @@ from deployment.model_server.tools.websocket_policy_server import WebsocketPolic
 from lerobot.configs import RTCAttentionSchedule
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.policies.factory import get_policy_class, make_pre_post_processors
-from lerobot.policies.mot_falcon.transformers_falcon_shim import (
-    TYPES_NEEDING_TRANSFORMERS_FALCON,
-    masquerade_transformers_falcon,
-)
 from lerobot.policies.rtc import RTCConfig
 from lerobot.utils.constants import OBS_IMAGES, OBS_STATE
 
@@ -59,29 +56,6 @@ _CAMERA_MAP_2CAM = {
 _IMAGE_FEATURES_2CAM = {
     "observation.images.primary": (3, 480, 640),
     "observation.images.wrist": (3, 480, 640),
-}
-
-# mot0/mot_falcon checkpoints keep the client's own camera names verbatim
-# (no primary/secondary/wrist renaming) -- confirmed against every real
-# falcon_mot_*_views{2,3}_15k checkpoint's config.json.
-_MOT_POLICY_TYPES = {"mot0", "mot_falcon"}
-_CAMERA_MAP_3CAM_MOT = {
-    "cam_high": "cam_high",
-    "cam_right_wrist": "cam_right_wrist",
-    "cam_left_wrist": "cam_left_wrist",
-}
-_IMAGE_FEATURES_3CAM_MOT = {
-    "observation.images.cam_high": (3, 480, 640),
-    "observation.images.cam_right_wrist": (3, 480, 640),
-    "observation.images.cam_left_wrist": (3, 480, 640),
-}
-_CAMERA_MAP_2CAM_MOT = {
-    "cam_high": "cam_high",
-    "cam_right_wrist": "cam_right_wrist",
-}
-_IMAGE_FEATURES_2CAM_MOT = {
-    "observation.images.cam_high": (3, 480, 640),
-    "observation.images.cam_right_wrist": (3, 480, 640),
 }
 
 # State/action axis (-7AD selects _RIGHT7, default is _BIMANUAL_BASE).
@@ -153,27 +127,19 @@ class PolicyServer:
         rtc_inference_delay: int = 0,
         two_views: bool = False,
         right_arm_7d: bool = False,
-        policy_type: str = "pi05",
-        checkpoint_action_horizon: int = 50,
     ) -> None:
         self._policy = policy
         self._preprocessor = preprocessor
         self._postprocessor = postprocessor
         self._two_views = bool(two_views)
         self._right_arm_7d = bool(right_arm_7d)
-        self._policy_type = policy_type
-        self._is_mot = policy_type in _MOT_POLICY_TYPES
-        if self._is_mot:
-            self._camera_map = dict(_CAMERA_MAP_2CAM_MOT if self._two_views else _CAMERA_MAP_3CAM_MOT)
-        else:
-            self._camera_map = dict(_CAMERA_MAP_2CAM if self._two_views else _CAMERA_MAP_3CAM)
+        self._camera_map = dict(_CAMERA_MAP_2CAM if self._two_views else _CAMERA_MAP_3CAM)
         self._checkpoint_state_dim = (
             _CHECKPOINT_STATE_DIM_RIGHT7 if self._right_arm_7d else _CHECKPOINT_STATE_DIM_BIMANUAL_BASE
         )
         self._checkpoint_action_dim = (
             _CHECKPOINT_ACTION_DIM_RIGHT7 if self._right_arm_7d else _CHECKPOINT_ACTION_DIM_BIMANUAL_BASE
         )
-        self._checkpoint_action_horizon = checkpoint_action_horizon
         self._device = next(policy.parameters()).device
         self._debug = debug_dir is not None
         self._call_idx = 0
@@ -202,20 +168,15 @@ class PolicyServer:
                     _RTC_PROTOCOL_VERSION,
                 )
 
-        if self._is_mot:
-            self._image_shapes = dict(_IMAGE_FEATURES_2CAM_MOT if self._two_views else _IMAGE_FEATURES_3CAM_MOT)
-        else:
-            self._image_shapes = dict(_IMAGE_FEATURES_2CAM if self._two_views else _IMAGE_FEATURES_3CAM)
+        self._image_shapes = dict(_IMAGE_FEATURES_2CAM if self._two_views else _IMAGE_FEATURES_3CAM)
         self._model_image_size = (224, 224)
         logging.info(
-            "PolicyServer: device=%s, policy_type=%s, camera_map=%s, client_color_space=bgr, "
-            "two_views=%s, right_arm_7d=%s, action_horizon=%d",
+            "PolicyServer: device=%s, camera_map=%s, client_color_space=bgr, "
+            "two_views=%s, right_arm_7d=%s",
             self._device,
-            self._policy_type,
             self._camera_map,
             self._two_views,
             self._right_arm_7d,
-            self._checkpoint_action_horizon,
         )
         if self._right_arm_7d:
             logging.info(
@@ -569,10 +530,9 @@ class PolicyServer:
         )  # (B, T, D) or (B, D)
         if chunk.ndim != 3:
             chunk = chunk.unsqueeze(0)  # → (B, 1, D)
-        if chunk.shape != (1, self._checkpoint_action_horizon, self._checkpoint_action_dim):
+        if chunk.shape != (1, 50, self._checkpoint_action_dim):
             raise ValueError(
-                f"AIDRC checkpoint must return shape "
-                f"(1, {self._checkpoint_action_horizon}, {self._checkpoint_action_dim}); "
+                f"AIDRC checkpoint must return shape (1, 50, {self._checkpoint_action_dim}); "
                 f"got {tuple(chunk.shape)}"
             )
         if self._rtc_config is not None and self._rtc_config.enabled:
@@ -735,12 +695,6 @@ def _validate_checkpoint_config(config, *, two_views: bool = False, right_arm_7d
     (``right_arm_7d``: bare 7-dim right-arm vs the original 19-state/
     16-action bimanual+base). There is no dynamic remapping — a checkpoint
     that doesn't exactly match the selected combination is rejected.
-
-    ``policy_type`` selects which camera-name contract applies (pi05's
-    renamed primary/secondary/wrist vs mot0/mot_falcon's identity camera
-    names) and, for mot0/mot_falcon, allows the checkpoint's own chunk_size
-    (25 for known checkpoints, not pi05's fixed 50) instead of requiring it
-    to equal 50.
     """
     errors = []
 
@@ -748,13 +702,7 @@ def _validate_checkpoint_config(config, *, two_views: bool = False, right_arm_7d
         if not condition:
             errors.append(message)
 
-    policy_type = getattr(config, "type", None)
-    is_mot = policy_type in _MOT_POLICY_TYPES
-
-    if is_mot:
-        expected_images = _IMAGE_FEATURES_2CAM_MOT if two_views else _IMAGE_FEATURES_3CAM_MOT
-    else:
-        expected_images = _IMAGE_FEATURES_2CAM if two_views else _IMAGE_FEATURES_3CAM
+    expected_images = _IMAGE_FEATURES_2CAM if two_views else _IMAGE_FEATURES_3CAM
     expected_state_dim = _CHECKPOINT_STATE_DIM_RIGHT7 if right_arm_7d else _CHECKPOINT_STATE_DIM_BIMANUAL_BASE
     expected_action_dim = _CHECKPOINT_ACTION_DIM_RIGHT7 if right_arm_7d else _CHECKPOINT_ACTION_DIM_BIMANUAL_BASE
 
@@ -766,10 +714,7 @@ def _validate_checkpoint_config(config, *, two_views: bool = False, right_arm_7d
         key: _enum_value(value) for key, value in (getattr(config, "normalization_mapping", {}) or {}).items()
     }
 
-    require(
-        policy_type == "pi05" or is_mot,
-        f"policy type must be pi05 or one of {sorted(_MOT_POLICY_TYPES)}, got {policy_type!r}",
-    )
+    require(getattr(config, "type", None) == "pi05", "policy type must be pi05")
     require(
         actual_images == expected_images and tuple(actual_images) == tuple(expected_images),
         f"ordered image features must be {expected_images}, got {actual_images}",
@@ -783,15 +728,8 @@ def _validate_checkpoint_config(config, *, two_views: bool = False, right_arm_7d
         f"action feature must have shape ({expected_action_dim},)",
     )
     require(getattr(config, "n_obs_steps", None) == 1, "n_obs_steps must be 1")
-    if is_mot:
-        chunk_size = getattr(config, "chunk_size", None)
-        require(
-            chunk_size is not None and chunk_size == getattr(config, "n_action_steps", None),
-            "chunk_size must equal n_action_steps",
-        )
-    else:
-        require(getattr(config, "chunk_size", None) == 50, "chunk_size must be 50")
-        require(getattr(config, "n_action_steps", None) == 50, "n_action_steps must be 50")
+    require(getattr(config, "chunk_size", None) == 50, "chunk_size must be 50")
+    require(getattr(config, "n_action_steps", None) == 50, "n_action_steps must be 50")
     require(getattr(config, "num_inference_steps", None) == 10, "num_inference_steps must be 10")
     require(getattr(config, "max_state_dim", None) == 32, "max_state_dim must be 32")
     require(getattr(config, "max_action_dim", None) == 32, "max_action_dim must be 32")
@@ -847,7 +785,7 @@ def _configure_rtc(config, args) -> None:
     )
 
 
-def _warmup_compiled_policy(policy_server: PolicyServer) -> None:
+def _warmup_compiled_policy(policy_server: PolicyServer, *, two_views: bool) -> None:
     """Run one synthetic request through the full pipeline before serving real traffic.
 
     With --compile, torch.compile only traces/compiles on the first call to
@@ -855,10 +793,10 @@ def _warmup_compiled_policy(policy_server: PolicyServer) -> None:
     max-autotune) cost would land on whichever robot happens to send the
     first real request instead of at startup.
     """
-    camera_map = policy_server._camera_map  # noqa: SLF001
-    image_shapes = policy_server._image_shapes  # noqa: SLF001
+    camera_map = _CAMERA_MAP_2CAM if two_views else _CAMERA_MAP_3CAM
+    image_features = _IMAGE_FEATURES_2CAM if two_views else _IMAGE_FEATURES_3CAM
     images = {
-        client_key: np.zeros(image_shapes[f"observation.images.{lerobot_name}"], dtype=np.uint8)
+        client_key: np.zeros(image_features[f"observation.images.{lerobot_name}"], dtype=np.uint8)
         for client_key, lerobot_name in camera_map.items()
     }
     example = {
@@ -911,17 +849,8 @@ def main(args) -> None:
     if args.compile:
         config.compile_mode = args.compile_mode
 
-    policy_class = get_policy_class(config.type)
-    # mot_falcon needs the vendored Falcon3-VL transformers fork (see
-    # lerobot.policies.mot_falcon.transformers_falcon_shim); everything else
-    # constructs against the real, installed transformers package as usual.
-    falcon_ctx = (
-        masquerade_transformers_falcon()
-        if config.type in TYPES_NEEDING_TRANSFORMERS_FALCON
-        else contextlib.nullcontext()
-    )
-    with falcon_ctx:
-        policy = policy_class.from_pretrained(str(checkpoint), config=config).to(args.device).eval()
+    policy_class = get_policy_class("pi05")
+    policy = policy_class.from_pretrained(str(checkpoint), config=config).to(args.device).eval()
     preprocessor, postprocessor = make_pre_post_processors(
         config,
         pretrained_path=str(checkpoint),
@@ -936,12 +865,10 @@ def main(args) -> None:
         rtc_inference_delay=args.rtc_inference_delay,
         two_views=two_views,
         right_arm_7d=right_arm_7d,
-        policy_type=config.type,
-        checkpoint_action_horizon=config.chunk_size,
     )
 
     if args.compile:
-        _warmup_compiled_policy(policy_server)
+        _warmup_compiled_policy(policy_server, two_views=two_views)
 
     hostname = socket.gethostname()
     local_ip = socket.gethostbyname(hostname)
@@ -954,11 +881,11 @@ def main(args) -> None:
         idle_timeout=args.idle_timeout,
         metadata={
             "env": "aidrc_pi05",
-            "policy_type": config.type,
-            "camera_map": policy_server._camera_map,  # noqa: SLF001
+            "policy_type": "pi05",
+            "camera_map": _CAMERA_MAP_2CAM if two_views else _CAMERA_MAP_3CAM,
             "client_color_space": "bgr",
             "action_dim": _CLIENT_ACTION_DIM,
-            "action_horizon": policy_server._checkpoint_action_horizon,  # noqa: SLF001
+            "action_horizon": 50,
             "fps": 30,
             "two_views": two_views,
             "right_arm_7d": right_arm_7d,
