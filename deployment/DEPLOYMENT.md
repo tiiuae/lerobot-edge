@@ -35,6 +35,18 @@ uv pip install "websockets==17.0.1" "msgpack==1.2.1"
 `websockets` and `msgpack` are installed explicitly because the deployment
 transport uses them, but they are not dependencies of the LeRobot package.
 
+To serve `pi05`/`mot0`/`mot_falcon` checkpoints, also install:
+
+```bash
+uv pip install "transformers>=5.4.0,<5.6.0"   # resolves to 5.5.4
+uv pip install scipy                          # resolves to 1.18.1 -- Falcon3-VL's dynamic module loading needs it
+
+# mot_falcon only: the vendored Falcon3-VL transformers fork, as its own
+# distinctly-named package so it doesn't collide with real transformers above
+# (see "mot_falcon / mot0 prerequisites" below for why this is needed).
+uv pip install /lustre1/tier2/projects/falcon-vla/mot/distill_codebase_20260909/teammate_env/wheels/transformers_falcon-4.48.0.dev0-py3-none-any.whl
+```
+
 Verify the environment:
 
 ```bash
@@ -44,6 +56,23 @@ python -c "import lerobot, torch, websockets, msgpack; print('lerobot', lerobot.
 
 The LeRobot version should be `0.6.2`. Create the environment once; for later
 runs, only activate it with `source .venv/bin/activate`.
+
+Exact versions this has been verified against (`uv pip list`):
+
+| Package | Version |
+|---|---|
+| `lerobot` | `0.6.2` (editable, this repo) |
+| `torch` | `2.11.0+cu128` |
+| `transformers` | `5.5.4` |
+| `transformers-falcon` | `4.48.0.dev0` |
+| `scipy` | `1.18.1` |
+| `websockets` | `17.0.1` |
+| `msgpack` | `1.2.1` |
+
+If you hit an import error for a class real `transformers` should have (e.g.
+`cannot import name 'Qwen3VLConfig' from transformers`), diff your `uv pip list`
+against this table before assuming it's a code bug -- see the troubleshooting
+table below.
 
 ## Run the server
 
@@ -418,6 +447,7 @@ keeps these artifacts out of Git.
 | `Policy type '...' is not registered` | The checkpoint's policy type has no config/policy class in this LeRobot checkout (e.g. `mot_falcon_pi05expert`, the distilled falcon-mot student, isn't ported yet -- `mot0`/`mot_falcon` are). Blocks both `--dry_run` and normal serving -- port the policy class into this repo first, from lerobot-internal's `kebin/realworld-dataset-training` branch specifically (see that branch for anything newer). |
 | `draccus.utils.DecodingError: The fields ... are not valid for ...Config` | The checkpoint's saved `config.json` has a field the currently-registered config dataclass for its type doesn't declare (or is missing one it requires) -- usually because the checkpoint was saved by an older/newer version of that policy's config class than what's in this checkout. Needs the config class or the checkpoint reconciled. |
 | `ModuleNotFoundError: No module named 'transformers_falcon'` | The vendored Falcon3-VL `transformers` fork isn't installed in this environment. `uv pip install` the wheel referenced above ("mot_falcon / mot0 prerequisites"), then retry. |
+| `cannot import name 'X' from transformers` (for a class real `transformers` should have, e.g. `Qwen3VLConfig`) -- for a *different* policy than the one you're deploying, or outside any `mot_falcon` construction | Not a `mot_falcon`-masquerade leak -- `masquerade_transformers_falcon()` is verified to correctly scope and restore `sys.modules['transformers']` around `mot_falcon` construction only. This means your environment's real `transformers` install itself is stale/mismatched. Compare `uv pip list` against the version table above ("Create the virtual environment") and reinstall `transformers` if it differs. |
 | `ImportError: This modeling file requires the following packages ...: scipy` | Install `scipy` (`uv pip install scipy`) -- needed by the Falcon3-VL processor's dynamic module loading, independent of the transformers fork. |
 | `KeyError: "Processor step 'delta_actions_processor' not found in registry"` | lerobot-internal serializes `RelativeActionsProcessorStep` under the name `delta_actions_processor`; this repo's own convention is `relative_actions_processor` for the same class. `mot_falcon`'s `processor_mot_falcon.py` registers a read-only alias for the former on import -- if this still fires, confirm `mot_falcon` was actually imported before loading the checkpoint's processors (e.g. via `lerobot.policies`, not a narrower import). |
 | `FileNotFoundError: ... model.safetensors` (or another `.safetensors` file) despite the file existing | Permissions, not a missing file -- `ls -la` the checkpoint directory; MOT-Falcon checkpoints have been seen with `.safetensors` files at mode `0600`/`0660` owned by the training user's personal group, unreadable by anyone else even if group membership looks right. Ask the checkpoint's owner to widen read permissions. |
