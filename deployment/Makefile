@@ -14,9 +14,6 @@ UV             ?= uv
 # Defaults — override per invocation
 # ---------------------------------------------------------------------------
 CKPT           ?= /home/ibrahim/storage/VLA_MODELS/special_tests/Pi0/last/pretrained_model
-POLICY_TYPE    ?=
-CAM_KEYS       ?= cam_high:primary,cam_left_wrist:secondary,cam_right_wrist:wrist
-ACTIONS        ?= 25
 DEVICE         ?= cuda:0
 PORT           ?= 8800
 IDLE_TIMEOUT   ?= -1
@@ -33,15 +30,9 @@ HF_CACHE       ?= $(HOME)/.cache/huggingface
 # Common flags
 # ---------------------------------------------------------------------------
 SERVER_FLAGS = --ckpt_path $(CKPT) \
-               --camera_keys $(CAM_KEYS) \
-               --actions_per_chunk $(ACTIONS) \
                --device $(DEVICE) \
                --port $(PORT) \
-               --idle_timeout $(IDLE_TIMEOUT) \
-               --use_bf16
-ifneq ($(strip $(POLICY_TYPE)),)
-SERVER_FLAGS += --policy_type $(POLICY_TYPE)
-endif
+               --idle_timeout $(IDLE_TIMEOUT)
 ifneq ($(strip $(DEBUG_DIR)),)
 SERVER_FLAGS += --debug_dir $(DEBUG_DIR)
 endif
@@ -74,7 +65,7 @@ help:
 	@printf "\n"
 	@printf "$(C_BOLD)Run (local venv):$(C_RST)\n"
 	@printf "  $(C_GREEN)serve$(C_RST)              Run server with current vars\n"
-	@printf "  $(C_GREEN)serve-pi05$(C_RST)         Run pi05 with starVLA-style cam mapping\n"
+	@printf "  $(C_GREEN)dry-run$(C_RST)            Validate CKPT's own contract and exit (no GPU, no weights loaded)\n"
 	@printf "  $(C_GREEN)serve-debug$(C_RST)        Run with debug artefacts under /tmp/lerobot_debug\n"
 	@printf "  $(C_GREEN)show-vars$(C_RST)          Print resolved variables and final flags\n"
 	@printf "\n"
@@ -91,13 +82,9 @@ help:
 	@printf "\n"
 	@printf "$(C_BOLD)Variables (override on command line):$(C_RST)\n"
 	@printf "  $(C_CYAN)CKPT$(C_RST)         = $(C_YEL)$(CKPT)$(C_RST)\n"
-	@printf "                  Local dir or HF Hub repo id of pretrained policy.\n"
-	@printf "  $(C_CYAN)POLICY_TYPE$(C_RST)  = $(C_YEL)$(if $(POLICY_TYPE),$(POLICY_TYPE),<auto>)$(C_RST)\n"
-	@printf "                  act|diffusion|pi0|pi05|smolvla|tdmpc|vqbet|groot|xvla|wall_x. Auto from config.json.\n"
-	@printf "  $(C_CYAN)CAM_KEYS$(C_RST)     = $(C_YEL)$(CAM_KEYS)$(C_RST)\n"
-	@printf "                  CSV of <client_key>:<lerobot_key> or bare <key>. Lerobot key joins observation.images.<key>.\n"
-	@printf "  $(C_CYAN)ACTIONS$(C_RST)      = $(C_YEL)$(ACTIONS)$(C_RST)\n"
-	@printf "                  --actions_per_chunk slice length.\n"
+	@printf "                  Local pretrained_model dir. Camera mapping and state/action layout\n"
+	@printf "                  are inferred automatically from the checkpoint's own config.json\n"
+	@printf "                  (see deployment/model_server/contract.py).\n"
 	@printf "  $(C_CYAN)DEVICE$(C_RST)       = $(C_YEL)$(DEVICE)$(C_RST)\n"
 	@printf "                  cuda, cuda:0, cpu, ...\n"
 	@printf "  $(C_CYAN)PORT$(C_RST)         = $(C_YEL)$(PORT)$(C_RST)\n"
@@ -121,19 +108,21 @@ help:
 	@printf "  make install\n"
 	@printf "  make cache-tokenizer\n"
 	@printf "\n"
-	@printf "  $(C_DIM)# Run pi05 server with starVLA-style client$(C_RST)\n"
-	@printf "  make serve-pi05\n"
+	@printf "  $(C_DIM)# Run the default server$(C_RST)\n"
+	@printf "  make serve\n"
 	@printf "\n"
-	@printf "  $(C_DIM)# Run with custom checkpoint, port and identity cam keys$(C_RST)\n"
-	@printf "  make serve POLICY_TYPE=pi05 CKPT=/path/to/ckpt PORT=9000 \\\\\n"
-	@printf "             CAM_KEYS=primary,secondary,wrist\n"
+	@printf "  $(C_DIM)# Validate a new checkpoint before deploying (no GPU needed)$(C_RST)\n"
+	@printf "  make dry-run CKPT=/path/to/ckpt\n"
+	@printf "\n"
+	@printf "  $(C_DIM)# Run with a custom checkpoint and port$(C_RST)\n"
+	@printf "  make serve CKPT=/path/to/ckpt PORT=9000\n"
 	@printf "\n"
 	@printf "  $(C_DIM)# Capture debug artefacts$(C_RST)\n"
 	@printf "  make serve-debug\n"
 	@printf "\n"
 	@printf "  $(C_DIM)# Docker — build then run detached$(C_RST)\n"
 	@printf "  make docker-build\n"
-	@printf "  make docker-up-d POLICY_TYPE=pi05 CKPT=/models/special_tests/Pi0/last/pretrained_model\n"
+	@printf "  make docker-up-d CKPT=/models/special_tests/Pi0/last/pretrained_model\n"
 	@printf "  make docker-logs\n"
 	@printf "  make docker-down\n"
 
@@ -157,9 +146,9 @@ cache-tokenizer:
 serve:
 	cd $(LEROBOT_DIR) && $(PY) -m deployment.model_server.server_policy $(SERVER_FLAGS)
 
-.PHONY: serve-pi05
-serve-pi05:
-	$(MAKE) serve POLICY_TYPE=pi05
+.PHONY: dry-run
+dry-run:
+	cd $(LEROBOT_DIR) && $(PY) -m deployment.model_server.server_policy $(SERVER_FLAGS) --dry_run
 
 .PHONY: serve-debug
 serve-debug:
@@ -170,9 +159,6 @@ show-vars:
 	@echo "LEROBOT_DIR  = $(LEROBOT_DIR)"
 	@echo "VENV         = $(VENV)"
 	@echo "CKPT         = $(CKPT)"
-	@echo "POLICY_TYPE  = $(POLICY_TYPE)"
-	@echo "CAM_KEYS     = $(CAM_KEYS)"
-	@echo "ACTIONS      = $(ACTIONS)"
 	@echo "DEVICE       = $(DEVICE)"
 	@echo "PORT         = $(PORT)"
 	@echo "IDLE_TIMEOUT = $(IDLE_TIMEOUT)"
@@ -191,15 +177,15 @@ docker-build:
 
 .PHONY: docker-up
 docker-up:
-	CKPT=$(CKPT) POLICY_TYPE=$(POLICY_TYPE) CAM_KEYS=$(CAM_KEYS) \
-	ACTIONS=$(ACTIONS) DEVICE=$(DEVICE) PORT=$(PORT) IDLE_TIMEOUT=$(IDLE_TIMEOUT) \
+	CKPT=$(CKPT) \
+	DEVICE=$(DEVICE) PORT=$(PORT) IDLE_TIMEOUT=$(IDLE_TIMEOUT) \
 	DEBUG_DIR=$(DEBUG_DIR) MODELS_DIR=$(MODELS_DIR) HF_CACHE=$(HF_CACHE) \
 	$(COMPOSE) up --build
 
 .PHONY: docker-up-d
 docker-up-d:
-	CKPT=$(CKPT) POLICY_TYPE=$(POLICY_TYPE) CAM_KEYS=$(CAM_KEYS) \
-	ACTIONS=$(ACTIONS) DEVICE=$(DEVICE) PORT=$(PORT) IDLE_TIMEOUT=$(IDLE_TIMEOUT) \
+	CKPT=$(CKPT) \
+	DEVICE=$(DEVICE) PORT=$(PORT) IDLE_TIMEOUT=$(IDLE_TIMEOUT) \
 	DEBUG_DIR=$(DEBUG_DIR) MODELS_DIR=$(MODELS_DIR) HF_CACHE=$(HF_CACHE) \
 	$(COMPOSE) up -d --build
 

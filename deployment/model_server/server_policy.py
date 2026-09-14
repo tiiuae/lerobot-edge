@@ -1,6 +1,7 @@
 
 
 import argparse
+import contextlib
 import json
 import logging
 import queue
@@ -15,10 +16,19 @@ import numpy as np
 import torch
 from PIL import Image as _PIL_Image
 
+from deployment.model_server.contract import (
+    CheckpointContract,
+    infer_contract,
+    validate_universal_expectations,
+)
 from deployment.model_server.tools.websocket_policy_server import WebsocketPolicyServer
 from lerobot.configs import RTCAttentionSchedule
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.policies.factory import get_policy_class, make_pre_post_processors
+from lerobot.policies.mot_falcon.transformers_falcon_shim import (
+    TYPES_NEEDING_TRANSFORMERS_FALCON,
+    masquerade_transformers_falcon,
+)
 from lerobot.policies.rtc import RTCConfig
 from lerobot.utils.constants import OBS_IMAGES, OBS_STATE
 
@@ -28,52 +38,6 @@ _Y = "\033[33m"
 _C = "\033[36m"
 _R = "\033[0m"
 
-
-# Two independent axes, each with its own flag. --2_views and -7AD are not
-# coupled: known checkpoints exist for 3cam+7AD (all three views, 7-dim
-# right-arm-only state/action) as well as 2cam+7AD (pi05_aidrc_rightarm_2cam).
-# _validate_checkpoint_config is what actually rejects a mismatched
-# checkpoint — these flags just select which of the four combinations to
-# validate against and adapt for.
-
-# Camera axis (--2_views selects _2CAM, default is _3CAM).
-_CAMERA_MAP_3CAM = {
-    "cam_high": "primary",
-    "cam_left_wrist": "secondary",
-    "cam_right_wrist": "wrist",
-}
-_IMAGE_FEATURES_3CAM = {
-    "observation.images.primary": (3, 480, 640),
-    "observation.images.secondary": (3, 480, 640),
-    "observation.images.wrist": (3, 480, 640),
-}
-# Positional: primary then wrist. cam_left_wrist is tolerated as an ignored
-# extra if the client still sends it (see _adapt_example).
-_CAMERA_MAP_2CAM = {
-    "cam_high": "primary",
-    "cam_right_wrist": "wrist",
-}
-_IMAGE_FEATURES_2CAM = {
-    "observation.images.primary": (3, 480, 640),
-    "observation.images.wrist": (3, 480, 640),
-}
-
-# State/action axis (-7AD selects _RIGHT7, default is _BIMANUAL_BASE).
-_CHECKPOINT_STATE_DIM_BIMANUAL_BASE = 19  # left7 + right7 + base5
-_CHECKPOINT_ACTION_DIM_BIMANUAL_BASE = 16  # left7 + right7 + base_velocity2
-# Bare 7-dim right-arm state/action, no stationary-base padding. The left arm
-# is not modelled by the checkpoint at all; this deployment still holds it at
-# its measured pose (see _run_pipeline) so the client always gets a
-# homogeneous 14-joint action, same as the discarded left-arm prediction in
-# BIMANUAL_BASE mode.
-_CHECKPOINT_STATE_DIM_RIGHT7 = 7
-_CHECKPOINT_ACTION_DIM_RIGHT7 = 7
-
-_CLIENT_STATE_DIM = 14
-_CLIENT_ACTION_DIM = 14
-_STATIONARY_BASE_STATE_DIM = 5
-_LEFT_ARM_SLICE = slice(0, 7)
-_RIGHT_ARM_SLICE = slice(7, 14)
 _RTC_PROTOCOL_VERSION = 2
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 _REPOSITORY_DEBUG_ROOT = _REPOSITORY_ROOT / "logs" / "pi05_debug"
@@ -86,18 +50,23 @@ _REPOSITORY_DEBUG_ROOT = _REPOSITORY_ROOT / "logs" / "pi05_debug"
 
 class PolicyServer:
     """
-    Fixed adapter between the Trossen OpenPI client and the AIDRC pi0.5 policy.
+    Generic adapter between the Trossen OpenPI client and any LeRobot policy checkpoint, driven
+    by a :class:`~deployment.model_server.contract.CheckpointContract` inferred from the loaded
+    checkpoint's own config (see ``deployment/model_server/contract.py``).
 
     Responsibilities:
       1. Observation adaptation  — translates the openpi-client format
                                    (`{"images": {...}, "state": ndarray, "prompt": str}`)
                                    to the LeRobot policy format
-                                   (`observation.images.<cam>`, `observation.state`, `task`).
+                                   (`observation.images.<cam>`, `observation.state`, `task`),
+                                   per the contract's camera map and state layout.
       2. Pre/Post processing     — runs the policy's preprocessor pipeline
                                    (tokenisation, normalisation, device move),
                                    then `policy.predict_action_chunk`,
                                    then the postprocessor pipeline (unnormalisation).
-      3. Action post-processing  — returns `{"actions": (T, D)}` numpy.
+      3. Action post-processing  — reassembles the client's fixed 14-dim action from the
+                                   model's output and the held raw client state, per the
+                                   contract's action layout, and returns `{"actions": (T, D)}`.
       4. Coloured action logging — prints every predicted chunk to stdout.
       5. Debug I/O saving        — optional (pass debug_dir=None to skip).
                                    Saved per call under
@@ -125,21 +94,21 @@ class PolicyServer:
         postprocessor,
         debug_dir: str | None = None,
         rtc_inference_delay: int = 0,
-        two_views: bool = False,
-        right_arm_7d: bool = False,
+        *,
+        contract: CheckpointContract,
     ) -> None:
         self._policy = policy
         self._preprocessor = preprocessor
         self._postprocessor = postprocessor
-        self._two_views = bool(two_views)
-        self._right_arm_7d = bool(right_arm_7d)
-        self._camera_map = dict(_CAMERA_MAP_2CAM if self._two_views else _CAMERA_MAP_3CAM)
-        self._checkpoint_state_dim = (
-            _CHECKPOINT_STATE_DIM_RIGHT7 if self._right_arm_7d else _CHECKPOINT_STATE_DIM_BIMANUAL_BASE
-        )
-        self._checkpoint_action_dim = (
-            _CHECKPOINT_ACTION_DIM_RIGHT7 if self._right_arm_7d else _CHECKPOINT_ACTION_DIM_BIMANUAL_BASE
-        )
+        self._contract = contract
+        self._camera_map = contract.camera_map
+        self._image_shapes = contract.image_shapes
+        self._tolerated_extra_cameras = set(contract.tolerated_extra_client_cameras)
+        self._client_state_dim = contract.client_state_dim
+        self._client_action_dim = contract.client_action_dim
+        self._checkpoint_state_dim = contract.checkpoint_state_dim
+        self._checkpoint_action_dim = contract.checkpoint_action_dim
+        self._checkpoint_action_horizon = len(policy.config.action_delta_indices)
         self._device = next(policy.parameters()).device
         self._debug = debug_dir is not None
         self._call_idx = 0
@@ -168,22 +137,17 @@ class PolicyServer:
                     _RTC_PROTOCOL_VERSION,
                 )
 
-        self._image_shapes = dict(_IMAGE_FEATURES_2CAM if self._two_views else _IMAGE_FEATURES_3CAM)
         self._model_image_size = (224, 224)
         logging.info(
-            "PolicyServer: device=%s, camera_map=%s, client_color_space=bgr, "
-            "two_views=%s, right_arm_7d=%s",
+            "PolicyServer: device=%s, policy_type=%s, camera_map=%s, client_color_space=bgr, "
+            "checkpoint_state_dim=%d, checkpoint_action_dim=%d, action_horizon=%d",
             self._device,
+            contract.policy_type,
             self._camera_map,
-            self._two_views,
-            self._right_arm_7d,
+            self._checkpoint_state_dim,
+            self._checkpoint_action_dim,
+            self._checkpoint_action_horizon,
         )
-        if self._right_arm_7d:
-            logging.info(
-                "right_arm_7d: checkpoint state/action are 7-dim right-arm-only "
-                "(no stationary-base padding); the left arm is held at its "
-                "measured pose from the client's state and never fed to the model"
-            )
         logging.info(
             "Image path: Trossen BGR -> RGB CHW float32 [0, 1], with the square resize "
             "corrected to the checkpoint's 4:3 letterboxed geometry."
@@ -232,12 +196,12 @@ class PolicyServer:
         return np.ascontiguousarray(a)
 
     def _restore_squashed_aspect(self, tensor: torch.Tensor, feature_key: str) -> torch.Tensor:
-        """Undo the Trossen client's 4:3-to-square resize for the AIDRC checkpoint.
+        """Undo the Trossen client's 4:3-to-square resize for the checkpoint's native geometry.
 
         The client has already stretched a 640x480 frame to 224x224. Resizing
         that square content to 224x168 and padding it recreates the geometry
-        that pi0.5's native resize-with-padding would have produced from the
-        original frame. This is only applied to square wire images whose saved
+        that the checkpoint's native resize-with-padding would have produced from
+        the original frame. This is only applied to square wire images whose saved
         feature shape is non-square.
         """
         feature_shape = self._image_shapes[feature_key]
@@ -292,23 +256,19 @@ class PolicyServer:
         return t.unsqueeze(0).contiguous()
 
     def _adapt_example(self, ex: dict) -> tuple[dict, np.ndarray]:
-        """openpi client format → (lerobot Observation dict, left-arm hold pose).
+        """openpi client format → (lerobot Observation dict, raw 14-dim client state).
 
-        The left-arm hold pose is always read from the client's raw 14-dim
-        state (indices 0:7), never from ``observation[OBS_STATE]``: in
-        right_arm_7d mode that tensor is only 7-dim (right arm) and has no
-        left-arm slot to read back out of.
+        The raw client state is returned in full (not pre-sliced) so that any
+        ``held_client_slice`` segment in the contract's ``checkpoint_action_layout``
+        can pull whatever sub-range it declares when reconstructing the client
+        action -- e.g. in right-arm-only contracts ``observation[OBS_STATE]`` is
+        only the 7-dim right arm and has no left-arm slot to read back out of.
         """
         observation: dict = {}
 
         images_dict = ex.get("images", {}) or {}
         missing_cameras = set(self._camera_map) - set(images_dict)
-        extra_cameras = set(images_dict) - set(self._camera_map)
-        if self._two_views:
-            # The client may still send cam_left_wrist (it always has, for
-            # the 3-camera deployment); this checkpoint just never asked for
-            # a third view, so tolerate that one specific extra key.
-            extra_cameras -= {"cam_left_wrist"}
+        extra_cameras = set(images_dict) - set(self._camera_map) - self._tolerated_extra_cameras
         if missing_cameras:
             raise ValueError(
                 f"checkpoint requires camera(s) {sorted(self._camera_map)}; "
@@ -316,50 +276,42 @@ class PolicyServer:
             )
         if extra_cameras:
             raise ValueError(f"checkpoint does not accept extra cameras: {sorted(extra_cameras)}")
-        for client_cam, lerobot_cam in self._camera_map.items():
-            feature_key = f"{OBS_IMAGES}.{lerobot_cam}"
+        for client_cam, checkpoint_cam in self._camera_map.items():
+            feature_key = f"{OBS_IMAGES}.{checkpoint_cam}"
             observation[feature_key] = self._image_to_tensor(feature_key, images_dict[client_cam])
 
         state = ex.get("state")
         if state is None:
-            raise ValueError("AIDRC checkpoint requires a state vector")
+            raise ValueError("checkpoint requires a state vector")
         s = torch.as_tensor(np.array(state, copy=True), dtype=torch.float32)
         if s.ndim == 1:
             s = s.unsqueeze(0)  # (D,) → (1, D)
         if s.ndim != 2 or s.shape[0] != 1:
-            raise ValueError(f"AIDRC server requires one state vector, got {tuple(s.shape)}")
+            raise ValueError(f"server requires one state vector, got {tuple(s.shape)}")
         if not torch.isfinite(s).all():
-            raise ValueError("AIDRC arm state contains NaN or infinite values")
-        if s.shape[1] != _CLIENT_STATE_DIM:
-            raise ValueError(
-                f"OpenPI must send {_CLIENT_STATE_DIM} arm-state values; got {s.shape[1]}"
-            )
+            raise ValueError("arm state contains NaN or infinite values")
+        if s.shape[1] != self._client_state_dim:
+            raise ValueError(f"OpenPI must send {self._client_state_dim} arm-state values; got {s.shape[1]}")
 
-        # Preserve the currently measured left-arm pose before any
-        # truncation/padding below. The model never predicts the left arm
-        # (it's not modelled at all in right_arm_7d mode, and its prediction
-        # is discarded in the 3-camera/16-dim mode) — the deployment holds it
-        # at this measured pose instead.
-        left_arm_hold = s[0, _LEFT_ARM_SLICE].detach().cpu().to(torch.float32).numpy().copy()
+        # Preserve the currently measured full client state before any slicing/padding below.
+        # This is what any `held_client_slice` action-layout segment reads from later, not
+        # `observation[OBS_STATE]` -- which may already be sliced/padded to a different width.
+        raw_client_state = s[0].detach().cpu().to(torch.float32).numpy().copy()
 
-        if self._right_arm_7d:
-            # Bare 7-dim right-arm state, no stationary-base padding, no left
-            # arm — independent of camera count (see module-level comment).
-            model_state = s[:, _RIGHT_ARM_SLICE]
-        else:
-            # The checkpoint was trained on left7 + right7 + five mobile-base
-            # fields. This deployment is stationary, so append fixed zero
-            # odometry and velocity values rather than asking the OpenPI
-            # client to send them.
-            stationary_base = s.new_zeros((s.shape[0], _STATIONARY_BASE_STATE_DIM))
-            model_state = torch.cat((s, stationary_base), dim=1)
+        segments = []
+        for seg in self._contract.checkpoint_state_layout:
+            if seg.source == "client_slice":
+                segments.append(s[:, seg.start : seg.start + seg.length])
+            else:  # "zeros"
+                segments.append(s.new_zeros((s.shape[0], seg.length)))
+        model_state = torch.cat(segments, dim=1)
         if model_state.shape[1] != self._checkpoint_state_dim:
-            raise RuntimeError(f"Internal AIDRC state mapping produced {tuple(model_state.shape)}")
+            raise RuntimeError(f"Internal state mapping produced {tuple(model_state.shape)}")
         observation[OBS_STATE] = model_state
 
         lang = ex.get("prompt") or ex.get("lang") or ex.get("task") or ""
         observation["task"] = lang
-        return observation, left_arm_hold
+        return observation, raw_client_state
 
     # ------------------------------------------------------------------
     # 2. Debug helpers
@@ -391,9 +343,10 @@ class PolicyServer:
 
         manifest = {
             "call_idx": self._call_idx,
+            "policy_type": self._contract.policy_type,
             "image_convention": (
-                "RGB CHW float32 [0,1], with geometry equivalent to pi0.5's "
-                "native 640x480-to-224x224 resize-with-padding"
+                "RGB CHW float32 [0,1], with geometry equivalent to the checkpoint's "
+                "native resize-with-padding"
             ),
             "client_color_space": "bgr",
             "images": {},
@@ -413,10 +366,20 @@ class PolicyServer:
             "shape": list(model_state.shape),
             "dtype": str(model_state.dtype),
         }
-        if not self._right_arm_7d:
-            manifest["model_state"]["stationary_base_suffix"] = model_state[
-                0, -_STATIONARY_BASE_STATE_DIM:
-            ].tolist()
+        offset = 0
+        zero_segments = []
+        for seg in self._contract.checkpoint_state_layout:
+            if seg.source == "zeros":
+                zero_segments.append(
+                    {
+                        "start": offset,
+                        "length": seg.length,
+                        "values": model_state[0, offset : offset + seg.length].tolist(),
+                    }
+                )
+            offset += seg.length
+        if zero_segments:
+            manifest["model_state"]["zero_padded_segments"] = zero_segments
         for feature_key, value in observation.items():
             if not feature_key.startswith(f"{OBS_IMAGES}."):
                 continue
@@ -457,25 +420,23 @@ class PolicyServer:
     def _run_pipeline(
         self,
         observation: dict,
-        left_arm_hold: np.ndarray,
+        raw_client_state: np.ndarray,
         *,
         rtc_query_step=None,
         rtc_inference_delay=None,
     ) -> np.ndarray:
         """preprocessor → policy.predict_action_chunk → postprocessor → (T, D) ndarray.
 
-        ``left_arm_hold`` is the measured left-arm pose from the raw client
-        request (see ``_adapt_example``), not derived from ``observation``
-        here — in right_arm_7d mode ``observation[OBS_STATE]`` is only the
-        7-dim right arm and has no left-arm slot to read.
+        ``raw_client_state`` is the raw 14-dim client request state (see
+        ``_adapt_example``), not derived from ``observation`` here -- depending on
+        the contract, ``observation[OBS_STATE]`` may already be sliced/padded and
+        have no slot to read a held segment back out of.
         """
         observation = self._preprocessor(observation)
 
         predict_kwargs = {}
         if self._rtc_config is not None and self._rtc_config.enabled:
-            query_step, query_step_error = self._parse_rtc_step(
-                rtc_query_step, "rtc_query_step"
-            )
+            query_step, query_step_error = self._parse_rtc_step(rtc_query_step, "rtc_query_step")
             inference_delay, inference_delay_error = self._parse_rtc_step(
                 rtc_inference_delay, "rtc_inference_delay"
             )
@@ -516,24 +477,20 @@ class PolicyServer:
                         # not a static execution-horizon truncation.
                         predict_kwargs = {
                             "inference_delay": inference_delay,
-                            "prev_chunk_left_over": self._previous_action_chunk[
-                                :, query_delta:
-                            ],
+                            "prev_chunk_left_over": self._previous_action_chunk[:, query_delta:],
                             "execution_horizon": overlap_horizon,
                         }
                         rtc_metadata["rtc_guidance_applied"] = True
 
             self._last_rtc_metadata = rtc_metadata
 
-        chunk = self._policy.predict_action_chunk(
-            observation, **predict_kwargs
-        )  # (B, T, D) or (B, D)
+        chunk = self._policy.predict_action_chunk(observation, **predict_kwargs)  # (B, T, D) or (B, D)
         if chunk.ndim != 3:
             chunk = chunk.unsqueeze(0)  # → (B, 1, D)
-        if chunk.shape != (1, 50, self._checkpoint_action_dim):
+        if chunk.shape != (1, self._checkpoint_action_horizon, self._checkpoint_action_dim):
             raise ValueError(
-                f"AIDRC checkpoint must return shape (1, 50, {self._checkpoint_action_dim}); "
-                f"got {tuple(chunk.shape)}"
+                f"checkpoint must return shape (1, {self._checkpoint_action_horizon}, "
+                f"{self._checkpoint_action_dim}); got {tuple(chunk.shape)}"
             )
         if self._rtc_config is not None and self._rtc_config.enabled:
             # Keep normalized model actions: RTC guidance runs before the
@@ -559,16 +516,22 @@ class PolicyServer:
         actions = torch.stack(processed, dim=1).squeeze(0)  # (T, D)
         actions = actions.detach().cpu().to(torch.float32).numpy()
         if not np.isfinite(actions).all():
-            raise ValueError("AIDRC policy returned NaN or infinite actions")
-        # Send a homogeneous 14-joint action to OpenPI: hold the left arm at
-        # the measured input pose and use only the model's actionable right7.
-        # In right_arm_7d mode the model's own action space IS right7 already
-        # (no left-arm/base columns to slice out of a wider vector).
-        right_actions = actions if self._right_arm_7d else actions[:, _RIGHT_ARM_SLICE]
-        left_actions = np.broadcast_to(left_arm_hold, (horizon, left_arm_hold.size)).copy()
-        client_actions = np.concatenate((left_actions, right_actions), axis=1)
-        if client_actions.shape != (horizon, _CLIENT_ACTION_DIM):
-            raise RuntimeError(f"Internal AIDRC action mapping produced {client_actions.shape}")
+            raise ValueError("policy returned NaN or infinite actions")
+
+        # Reassemble the client's fixed-width action from the contract's inferred layout: each
+        # segment is either a slice of the model's own output, or a client-state value held
+        # constant (broadcast) across the horizon -- e.g. an unmodelled arm parked at its
+        # measured pose.
+        segments = []
+        for seg in self._contract.checkpoint_action_layout:
+            if seg.source == "model_slice":
+                segments.append(actions[:, seg.start : seg.start + seg.length])
+            else:  # "held_client_slice"
+                held = raw_client_state[seg.start : seg.start + seg.length]
+                segments.append(np.broadcast_to(held, (horizon, seg.length)).copy())
+        client_actions = np.concatenate(segments, axis=1)
+        if client_actions.shape != (horizon, self._client_action_dim):
+            raise RuntimeError(f"Internal action mapping produced {client_actions.shape}")
         return client_actions
 
     @staticmethod
@@ -602,7 +565,7 @@ class PolicyServer:
         if not isinstance(examples, list):
             examples = [examples]
         if len(examples) != 1 or not isinstance(examples[0], dict):
-            raise ValueError("AIDRC server requires exactly one observation dictionary per request")
+            raise ValueError("server requires exactly one observation dictionary per request")
 
         ex = examples[0]  # realtime — single obs
 
@@ -616,7 +579,7 @@ class PolicyServer:
                 self.reset()
 
         # --- 1. Adapt observation ---
-        observation, left_arm_hold = self._adapt_example(ex)
+        observation, raw_client_state = self._adapt_example(ex)
 
         if rtc_enabled:
             prompt = observation["task"]
@@ -639,9 +602,7 @@ class PolicyServer:
 
         # --- 3. Run pipeline ---
         rtc_query_step = kwargs.get("rtc_query_step", ex.get("rtc_query_step"))
-        rtc_inference_delay = kwargs.get(
-            "rtc_inference_delay", ex.get("rtc_inference_delay")
-        )
+        rtc_inference_delay = kwargs.get("rtc_inference_delay", ex.get("rtc_inference_delay"))
         if (
             self._rtc_config is not None
             and self._rtc_config.enabled
@@ -655,7 +616,7 @@ class PolicyServer:
             )
         actions = self._run_pipeline(
             observation,
-            left_arm_hold,
+            raw_client_state,
             rtc_query_step=rtc_query_step,
             rtc_inference_delay=rtc_inference_delay,
         )
@@ -683,82 +644,30 @@ class PolicyServer:
 # ---------------------------------------------------------------------------
 
 
-def _enum_value(value):
-    return getattr(value, "value", value)
-
-
-def _validate_checkpoint_config(config, *, two_views: bool = False, right_arm_7d: bool = False) -> None:
-    """Reject anything outside the selected deployment contract.
-
-    Two independent axes, each with its own known checkpoints: camera count
-    (``two_views``: 2 vs the original 3) and state/action width
-    (``right_arm_7d``: bare 7-dim right-arm vs the original 19-state/
-    16-action bimanual+base). There is no dynamic remapping — a checkpoint
-    that doesn't exactly match the selected combination is rejected.
-    """
-    errors = []
-
-    def require(condition: bool, message: str) -> None:
-        if not condition:
-            errors.append(message)
-
-    expected_images = _IMAGE_FEATURES_2CAM if two_views else _IMAGE_FEATURES_3CAM
-    expected_state_dim = _CHECKPOINT_STATE_DIM_RIGHT7 if right_arm_7d else _CHECKPOINT_STATE_DIM_BIMANUAL_BASE
-    expected_action_dim = _CHECKPOINT_ACTION_DIM_RIGHT7 if right_arm_7d else _CHECKPOINT_ACTION_DIM_BIMANUAL_BASE
-
-    image_features = getattr(config, "image_features", {}) or {}
-    actual_images = {key: tuple(feature.shape) for key, feature in image_features.items()}
-    state_feature = getattr(config, "robot_state_feature", None)
-    action_feature = getattr(config, "action_feature", None)
-    normalization = {
-        key: _enum_value(value) for key, value in (getattr(config, "normalization_mapping", {}) or {}).items()
-    }
-
-    require(getattr(config, "type", None) == "pi05", "policy type must be pi05")
-    require(
-        actual_images == expected_images and tuple(actual_images) == tuple(expected_images),
-        f"ordered image features must be {expected_images}, got {actual_images}",
-    )
-    require(
-        state_feature is not None and tuple(state_feature.shape) == (expected_state_dim,),
-        f"state feature must have shape ({expected_state_dim},)",
-    )
-    require(
-        action_feature is not None and tuple(action_feature.shape) == (expected_action_dim,),
-        f"action feature must have shape ({expected_action_dim},)",
-    )
-    require(getattr(config, "n_obs_steps", None) == 1, "n_obs_steps must be 1")
-    require(getattr(config, "chunk_size", None) == 50, "chunk_size must be 50")
-    require(getattr(config, "n_action_steps", None) == 50, "n_action_steps must be 50")
-    require(getattr(config, "num_inference_steps", None) == 10, "num_inference_steps must be 10")
-    require(getattr(config, "max_state_dim", None) == 32, "max_state_dim must be 32")
-    require(getattr(config, "max_action_dim", None) == 32, "max_action_dim must be 32")
-    require(tuple(getattr(config, "image_resolution", ())) == (224, 224), "image_resolution must be 224x224")
-    require(getattr(config, "empty_cameras", None) == 0, "empty_cameras must be 0")
-    require(getattr(config, "tokenizer_max_length", None) == 200, "tokenizer_max_length must be 200")
-    require(getattr(config, "dtype", None) == "bfloat16", "dtype must be bfloat16")
-    require(getattr(config, "use_relative_actions", None) is False, "actions must be absolute")
-    require(
-        normalization == {"VISUAL": "IDENTITY", "STATE": "QUANTILES", "ACTION": "QUANTILES"},
-        "normalization must be VISUAL=IDENTITY and STATE/ACTION=QUANTILES",
-    )
-
-    if errors:
-        raise ValueError("Checkpoint does not match deployment_guide.md:\n- " + "\n- ".join(errors))
-
-
 def _validate_checkpoint_files(checkpoint: Path) -> None:
     required = {
         "config.json",
         "model.safetensors",
         "policy_preprocessor.json",
-        "policy_preprocessor_step_3_normalizer_processor.safetensors",
         "policy_postprocessor.json",
-        "policy_postprocessor_step_0_unnormalizer_processor.safetensors",
     }
     missing = sorted(name for name in required if not (checkpoint / name).is_file())
     if missing:
         raise FileNotFoundError(f"Checkpoint is missing required deployment files: {missing}")
+
+    # Processor state filenames encode a step index (e.g. "..._step_3_normalizer_processor...")
+    # that shifts with the pipeline's own step count/order -- a checkpoint with no relative/delta
+    # actions step, for instance, has its normalizer at a lower index than one that has it. Derive
+    # exactly which state files this checkpoint needs from its own saved pipeline configs instead
+    # of hardcoding one checkpoint's specific layout.
+    for pipeline_file in ("policy_preprocessor.json", "policy_postprocessor.json"):
+        pipeline_config = json.loads((checkpoint / pipeline_file).read_text())
+        for step in pipeline_config.get("steps", []):
+            state_file = step.get("state_file")
+            if state_file and not (checkpoint / state_file).is_file():
+                raise FileNotFoundError(
+                    f"Checkpoint is missing a deployment file referenced by {pipeline_file}: {state_file}"
+                )
 
 
 def _configure_rtc(config, args) -> None:
@@ -770,13 +679,9 @@ def _configure_rtc(config, args) -> None:
         return
 
     if not 0 <= args.rtc_inference_delay <= config.chunk_size:
-        raise ValueError(
-            f"rtc_inference_delay must be between 0 and {config.chunk_size}"
-        )
+        raise ValueError(f"rtc_inference_delay must be between 0 and {config.chunk_size}")
     if not 1 <= args.rtc_execution_horizon <= config.chunk_size:
-        raise ValueError(
-            f"rtc_execution_horizon must be between 1 and {config.chunk_size}"
-        )
+        raise ValueError(f"rtc_execution_horizon must be between 1 and {config.chunk_size}")
     config.rtc_config = RTCConfig(
         enabled=True,
         execution_horizon=args.rtc_execution_horizon,
@@ -785,7 +690,7 @@ def _configure_rtc(config, args) -> None:
     )
 
 
-def _warmup_compiled_policy(policy_server: PolicyServer, *, two_views: bool) -> None:
+def _warmup_compiled_policy(policy_server: PolicyServer, *, contract: CheckpointContract) -> None:
     """Run one synthetic request through the full pipeline before serving real traffic.
 
     With --compile, torch.compile only traces/compiles on the first call to
@@ -793,15 +698,10 @@ def _warmup_compiled_policy(policy_server: PolicyServer, *, two_views: bool) -> 
     max-autotune) cost would land on whichever robot happens to send the
     first real request instead of at startup.
     """
-    camera_map = _CAMERA_MAP_2CAM if two_views else _CAMERA_MAP_3CAM
-    image_features = _IMAGE_FEATURES_2CAM if two_views else _IMAGE_FEATURES_3CAM
-    images = {
-        client_key: np.zeros(image_features[f"observation.images.{lerobot_name}"], dtype=np.uint8)
-        for client_key, lerobot_name in camera_map.items()
-    }
+    images = {cam.client_key: np.zeros((3, 224, 224), dtype=np.uint8) for cam in contract.cameras}
     example = {
         "images": images,
-        "state": np.zeros(_CLIENT_STATE_DIM, dtype=np.float32),
+        "state": np.zeros(contract.client_state_dim, dtype=np.float32),
         "prompt": "warmup",
     }
 
@@ -821,36 +721,56 @@ def _warmup_compiled_policy(policy_server: PolicyServer, *, two_views: bool) -> 
 
 
 def main(args) -> None:
-    two_views = args.two_views
-    right_arm_7d = args.right_arm_7d
-
     checkpoint = Path(args.ckpt_path).expanduser().resolve(strict=True)
     if not checkpoint.is_dir():
         raise NotADirectoryError(f"Checkpoint path is not a directory: {checkpoint}")
     _validate_checkpoint_files(checkpoint)
 
-    logging.info(
-        "Loading fixed AIDRC pi0.5 checkpoint from %s (two_views=%s, right_arm_7d=%s)",
-        checkpoint,
-        two_views,
-        right_arm_7d,
-    )
+    logging.info("Loading checkpoint from %s", checkpoint)
     config = PreTrainedConfig.from_pretrained(str(checkpoint))
     config.device = args.device
-    _validate_checkpoint_config(config, two_views=two_views, right_arm_7d=right_arm_7d)
+
+    # Everything about how to serve this checkpoint -- camera mapping, state/action layout -- is
+    # read straight off its own declared config, not a hand-authored profile. See
+    # deployment/model_server/contract.py for the (small, fixed) rule set this applies.
+    contract = infer_contract(config)
+    validate_universal_expectations(config)
+    logging.info(
+        "Inferred contract: policy_type=%s, camera_map=%s, checkpoint_state_dim=%d, "
+        "checkpoint_action_dim=%d",
+        contract.policy_type,
+        contract.camera_map,
+        contract.checkpoint_state_dim,
+        contract.checkpoint_action_dim,
+    )
+
+    if args.dry_run:
+        logging.info(
+            "Checkpoint at %s matches this deployment's contract; --dry_run set, exiting.", checkpoint
+        )
+        return
 
     _configure_rtc(config, args)
 
     # torch.compile is a construction-time setting, unrelated to how the
-    # checkpoint was trained: PI05Pytorch.__init__ reads config.compile_model
-    # when it builds the model and wraps sample_actions/forward accordingly,
+    # checkpoint was trained: a policy's __init__ reads config.compile_model
+    # when it builds the model and wraps its inference path accordingly,
     # before from_pretrained loads any weights into it.
     config.compile_model = args.compile
     if args.compile:
         config.compile_mode = args.compile_mode
 
-    policy_class = get_policy_class("pi05")
-    policy = policy_class.from_pretrained(str(checkpoint), config=config).to(args.device).eval()
+    policy_class = get_policy_class(config.type)
+    # mot_falcon needs the vendored Falcon3-VL transformers fork (see
+    # lerobot.policies.mot_falcon.transformers_falcon_shim); everything else constructs against
+    # the real, installed transformers package as usual.
+    falcon_ctx = (
+        masquerade_transformers_falcon()
+        if config.type in TYPES_NEEDING_TRANSFORMERS_FALCON
+        else contextlib.nullcontext()
+    )
+    with falcon_ctx:
+        policy = policy_class.from_pretrained(str(checkpoint), config=config).to(args.device).eval()
     preprocessor, postprocessor = make_pre_post_processors(
         config,
         pretrained_path=str(checkpoint),
@@ -863,12 +783,11 @@ def main(args) -> None:
         postprocessor=postprocessor,
         debug_dir=args.debug_dir,
         rtc_inference_delay=args.rtc_inference_delay,
-        two_views=two_views,
-        right_arm_7d=right_arm_7d,
+        contract=contract,
     )
 
     if args.compile:
-        _warmup_compiled_policy(policy_server, two_views=two_views)
+        _warmup_compiled_policy(policy_server, contract=contract)
 
     hostname = socket.gethostname()
     local_ip = socket.gethostbyname(hostname)
@@ -880,15 +799,13 @@ def main(args) -> None:
         port=args.port,
         idle_timeout=args.idle_timeout,
         metadata={
-            "env": "aidrc_pi05",
-            "policy_type": "pi05",
-            "camera_map": _CAMERA_MAP_2CAM if two_views else _CAMERA_MAP_3CAM,
+            "env": contract.policy_type,
+            "policy_type": config.type,
+            "camera_map": contract.camera_map,
             "client_color_space": "bgr",
-            "action_dim": _CLIENT_ACTION_DIM,
-            "action_horizon": 50,
+            "action_dim": contract.client_action_dim,
+            "action_horizon": policy_server._checkpoint_action_horizon,  # noqa: SLF001
             "fps": 30,
-            "two_views": two_views,
-            "right_arm_7d": right_arm_7d,
             "rtc_enabled": args.rtc,
             "rtc_inference_delay": args.rtc_inference_delay if args.rtc else None,
             **(
@@ -907,12 +824,27 @@ def main(args) -> None:
 
 
 def build_argparser():
-    p = argparse.ArgumentParser(description="Serve the fixed AIDRC pi0.5 deployment checkpoint.")
+    p = argparse.ArgumentParser(
+        description="Serve a LeRobot policy checkpoint behind the Trossen deployment adapter."
+    )
     p.add_argument(
         "--ckpt_path",
         type=str,
         required=True,
-        help="Local pretrained_model directory described by deployment_guide.md.",
+        help=(
+            "Local pretrained_model directory. Camera mapping and state/action layout are "
+            "inferred automatically from the checkpoint's own config.json -- see "
+            "deployment/model_server/contract.py."
+        ),
+    )
+    p.add_argument(
+        "--dry_run",
+        action="store_true",
+        help=(
+            "Load the checkpoint's config.json, infer its contract, and validate it against this "
+            "deployment's fixed expectations, then exit without loading model weights or "
+            "starting the server. Needs no GPU; useful when introducing a new checkpoint."
+        ),
     )
     p.add_argument("--device", type=str, default="cuda")
     p.add_argument("--port", type=int, default=8800)
@@ -945,29 +877,9 @@ def build_argparser():
         "compile time).",
     )
     p.add_argument(
-        "--2_views",
-        dest="two_views",
-        action="store_true",
-        help="Serve a checkpoint with a 2-camera input (primary + wrist, "
-        "positional) instead of the fixed 3-camera bimanual+base image set. "
-        "Independent of -7AD: known checkpoints exist for 2 views with 7AD "
-        "(pi05_aidrc_rightarm_2cam) and for 3 views with 7AD.",
-    )
-    p.add_argument(
-        "-7AD",
-        dest="right_arm_7d",
-        action="store_true",
-        help="Serve a checkpoint with a bare 7-dim right-arm state/action "
-        "(no stationary-base padding) instead of the fixed 19-state/16-action "
-        "bimanual+base contract. The model never sees the left arm at all; "
-        "this deployment holds it at its measured pose from the client's "
-        "state, same as the default contract's discarded left-arm "
-        "prediction. Independent of --2_views.",
-    )
-    p.add_argument(
         "--rtc",
         action="store_true",
-        help="Enable Real-Time Chunking for pi0.5 inference.",
+        help="Enable Real-Time Chunking for inference.",
     )
     p.add_argument(
         "--rtc_inference_delay",

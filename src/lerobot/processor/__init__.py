@@ -97,6 +97,7 @@ from .relative_action_processor import (
     to_relative_actions,
 )
 from .rename_processor import RenameObservationsProcessorStep, rename_stats
+from .tokenizer_falcon_processor import FalconActionTokenizerProcessorStep
 from .tokenizer_processor import ActionTokenizerProcessorStep, TokenizerProcessorStep
 
 # RenderMessagesStep is intentionally NOT re-exported here: it pulls in
@@ -170,6 +171,7 @@ __all__ = [
     "RobotProcessorPipeline",
     "TokenizerProcessorStep",
     "ActionTokenizerProcessorStep",
+    "FalconActionTokenizerProcessorStep",
     "Torch2NumpyActionProcessorStep",
     "RobotActionToPolicyActionProcessorStep",
     "PolicyActionToRobotActionProcessorStep",

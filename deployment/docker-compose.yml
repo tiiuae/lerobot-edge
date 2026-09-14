@@ -2,7 +2,7 @@
 #   cd lerobot/deployment
 #   docker compose up --build
 #
-# Override values via env or `make docker-up CKPT=/path POLICY_TYPE=pi05 ...`.
+# Override values via env or `make docker-up CKPT=/path ...`.
 services:
   lerobot_server:
     image: lerobot_server:latest
@@ -25,16 +25,14 @@ services:
       - ${DEBUG_HOST_DIR:-/tmp/lerobot_debug}:/debug
 
     environment:
-      # Built up from compose vars so `make docker-up CKPT=... POLICY_TYPE=...` flows through.
-      # Note: CKPT must be a path INSIDE /models (since MODELS_DIR is mounted there).
+      # Built up from compose vars so `make docker-up CKPT=...` flows through.
+      # Note: CKPT must be a path INSIDE /models (since MODELS_DIR is mounted there). Camera
+      # mapping and state/action layout are inferred automatically from the checkpoint's own
+      # config.json (see deployment/model_server/contract.py) -- no profile flag needed.
       - SERVER_ARGS=--ckpt_path ${CKPT:-/models/checkpoint}
-                    ${POLICY_TYPE:+--policy_type ${POLICY_TYPE}}
-                    --camera_keys ${CAM_KEYS:-cam_high:primary,cam_left_wrist:secondary,cam_right_wrist:wrist}
-                    --actions_per_chunk ${ACTIONS:-25}
                     --device ${DEVICE:-cuda:0}
                     --port ${PORT:-8800}
                     --idle_timeout ${IDLE_TIMEOUT:--1}
-                    --use_bf16
                     ${DEBUG_DIR:+--debug_dir ${DEBUG_DIR}}
 
     deploy:

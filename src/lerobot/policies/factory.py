@@ -48,6 +48,12 @@ from lerobot.utils.import_utils import _peft_available, require_package
 
 from .evo1.configuration_evo1 import Evo1Config
 from .groot.configuration_groot import GrootConfig
+
+# Eager imports, registering "mot0"/"mot_falcon" in the PreTrainedConfig registry as a side
+# effect (same rationale as Evo1Config/GrootConfig above): needed so any code that only imports
+# `lerobot.policies` can load a saved mot0/mot_falcon checkpoint's config.json.
+from .mot0.configuration_mot0 import MOT0Config
+from .mot_falcon.configuration_mot_falcon import MOTFalconConfig  # noqa: F401 -- registration only
 from .pretrained import PreTrainedPolicy
 from .utils import validate_visual_features_consistency
 
@@ -177,7 +183,13 @@ def make_pre_post_processors(
     Raises:
         ValueError: If no processor factory exists for the given policy configuration type.
     """
-    if pretrained_path:
+    # MOT0 checkpoints build fresh processors by default instead of loading the pretrained
+    # pipeline from disk, matching the ported policy's own convention; only load from
+    # pretrained_path when the config explicitly opts back in via load_pretrained_pipeline.
+    load_pretrained_pipeline_for_mot0 = not isinstance(policy_cfg, MOT0Config) or getattr(
+        policy_cfg, "load_pretrained_pipeline", False
+    )
+    if pretrained_path and load_pretrained_pipeline_for_mot0:
         if isinstance(policy_cfg, GrootConfig):
             from .groot.processor_groot import make_groot_pre_post_processors_from_pretrained
 
