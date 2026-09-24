@@ -127,7 +127,11 @@ class PolicyServer:
         rtc_inference_delay: int = 0,
         two_views: bool = False,
         right_arm_7d: bool = False,
+        client_color_space: str = "rgb",
     ) -> None:
+        if client_color_space not in ("rgb", "bgr"):
+            raise ValueError(f"client_color_space must be 'rgb' or 'bgr', got {client_color_space!r}")
+        self._client_color_space = client_color_space
         self._policy = policy
         self._preprocessor = preprocessor
         self._postprocessor = postprocessor
@@ -171,10 +175,11 @@ class PolicyServer:
         self._image_shapes = dict(_IMAGE_FEATURES_2CAM if self._two_views else _IMAGE_FEATURES_3CAM)
         self._model_image_size = (224, 224)
         logging.info(
-            "PolicyServer: device=%s, camera_map=%s, client_color_space=bgr, "
+            "PolicyServer: device=%s, camera_map=%s, client_color_space=%s, "
             "two_views=%s, right_arm_7d=%s",
             self._device,
             self._camera_map,
+            self._client_color_space,
             self._two_views,
             self._right_arm_7d,
         )
@@ -185,8 +190,10 @@ class PolicyServer:
                 "measured pose from the client's state and never fed to the model"
             )
         logging.info(
-            "Image path: Trossen BGR -> RGB CHW float32 [0, 1], with the square resize "
-            "corrected to the checkpoint's 4:3 letterboxed geometry."
+            "Image path: %s wire -> RGB CHW float32 [0, 1]. Native-resolution frames are "
+            "passed through and pi0.5 letterboxes them to 224x224 itself, as in training; "
+            "legacy square 224x224 frames are restored to the 4:3 letterbox.",
+            self._client_color_space.upper(),
         )
 
         if self._debug:
@@ -276,17 +283,24 @@ class PolicyServer:
     def _image_to_tensor(self, feature_key: str, arr: np.ndarray) -> torch.Tensor:
         """Convert a wire image to the RGB tensor convention used during training.
 
-        LeRobot training uses RGB ``(C,H,W)`` float32 tensors in ``[0,1]``.
-        The Trossen bridge sends BGR after squashing 640x480 to 224x224, so this
-        method reverses the channels and reconstructs the final 4:3 letterbox.
+        LeRobot training uses RGB ``(C,H,W)`` float32 tensors in ``[0,1]``, from
+        640x480 frames that pi0.5 letterboxes to 224x224 in _preprocess_images.
+
+        The current Trossen client sends exactly that: native resolution, RGB,
+        untouched. Those frames pass straight through, and the model's own
+        resize-with-padding produces the same geometry as in training.
+
+        Older clients squashed every frame to 224x224 and swapped it to BGR.
+        Those are still accepted: a square frame is restored to the 4:3
+        letterbox by _restore_squashed_aspect, and --client_color_space bgr
+        reverses the channels. The squash still costs detail that native frames
+        keep, so prefer the current client.
         """
         chw = self._to_chw_uint8(arr)
-        if chw.shape != (3, 224, 224):
-            raise ValueError(
-                "Trossen client images must have shape (3, 224, 224) before aspect correction; "
-                f"got {chw.shape} for {feature_key}"
-            )
-        chw = np.ascontiguousarray(chw[::-1])  # fixed Trossen BGR -> training RGB
+        if chw.shape[0] != 3:
+            raise ValueError(f"Expected a 3-channel image for {feature_key}, got {chw.shape}")
+        if self._client_color_space == "bgr":
+            chw = np.ascontiguousarray(chw[::-1])  # legacy BGR client -> training RGB
         t = torch.from_numpy(np.array(chw, copy=True)).to(torch.float32) / 255.0
         t = self._restore_squashed_aspect(t, feature_key)
         return t.unsqueeze(0).contiguous()
@@ -392,10 +406,10 @@ class PolicyServer:
         manifest = {
             "call_idx": self._call_idx,
             "image_convention": (
-                "RGB CHW float32 [0,1], with geometry equivalent to pi0.5's "
-                "native 640x480-to-224x224 resize-with-padding"
+                "RGB CHW float32 [0,1]; native frames as received (pi0.5 letterboxes them), "
+                "legacy square frames restored to the 4:3 letterbox"
             ),
-            "client_color_space": "bgr",
+            "client_color_space": self._client_color_space,
             "images": {},
         }
         proprio = np.asarray(ex["state"]).copy()
@@ -865,6 +879,7 @@ def main(args) -> None:
         rtc_inference_delay=args.rtc_inference_delay,
         two_views=two_views,
         right_arm_7d=right_arm_7d,
+        client_color_space=args.client_color_space,
     )
 
     if args.compile:
@@ -883,7 +898,7 @@ def main(args) -> None:
             "env": "aidrc_pi05",
             "policy_type": "pi05",
             "camera_map": _CAMERA_MAP_2CAM if two_views else _CAMERA_MAP_3CAM,
-            "client_color_space": "bgr",
+            "client_color_space": args.client_color_space,
             "action_dim": _CLIENT_ACTION_DIM,
             "action_horizon": 50,
             "fps": 30,
@@ -916,6 +931,13 @@ def build_argparser():
     )
     p.add_argument("--device", type=str, default="cuda")
     p.add_argument("--port", type=int, default=8800)
+    p.add_argument(
+        "--client_color_space",
+        choices=("rgb", "bgr"),
+        default="rgb",
+        help="Channel order the client puts on the wire. The openpi Trossen client sends RGB, "
+        "which is the default. Use 'bgr' only for clients built before it stopped swapping channels.",
+    )
     p.add_argument(
         "--idle_timeout", type=int, default=-1, help="Idle timeout in seconds, -1 means never close."
     )

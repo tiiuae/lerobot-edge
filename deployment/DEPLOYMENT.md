@@ -121,18 +121,23 @@ need a different adapter and are rejected instead of being silently remapped.
 ```python
 {
     "images": {
-        "cam_high":        np.ndarray((3, 224, 224), dtype=np.uint8),
-        "cam_left_wrist":  np.ndarray((3, 224, 224), dtype=np.uint8),
-        "cam_right_wrist": np.ndarray((3, 224, 224), dtype=np.uint8),
+        "cam_high":        np.ndarray((3, 480, 640), dtype=np.uint8),
+        "cam_left_wrist":  np.ndarray((3, 480, 640), dtype=np.uint8),
+        "cam_right_wrist": np.ndarray((3, 480, 640), dtype=np.uint8),
     },
     "state":  np.ndarray((14,), dtype=np.float32),
     "prompt": "task instruction expected by the checkpoint",
 }
 ```
 
-The wire images are BGR. The server converts them to RGB float32 tensors in
-`[0,1]`. The current client sends CHW `(3,224,224)` arrays; the adapter also
-accepts HWC `(224,224,3)` arrays and converts them to CHW.
+The wire images are **RGB at native camera resolution**, untouched: CHW
+`(3,480,640)` arrays, exactly as lerobot's camera produced them. The server
+converts them to RGB float32 tensors in `[0,1]` without flipping channels. The
+adapter also accepts HWC arrays and converts them to CHW.
+
+Older Trossen clients squashed every frame to `(3,224,224)` and swapped it to
+**BGR**. Those still work: launch with `--client_color_space bgr`, and square
+frames are restored to the 4:3 letterbox (see below). The default is `rgb`.
 
 Camera mapping is fixed:
 
@@ -176,9 +181,13 @@ The resize uses bilinear interpolation with `align_corners=False`, then pads
 with `0.0`. The subsequent model normalization maps `[0,1]` to `[-1,1]`, so
 the black padding becomes `-1.0` at the model input.
 
-The existing OpenPI client has already resized each `640×480` frame to a
-square `224×224` wire image. The server therefore restores the intended
-geometry as follows:
+The current client sends the native `640×480` frame, so the server passes it
+through and `_preprocess_images` letterboxes it exactly as in training. This is
+pixel-identical to the training path.
+
+Older clients resized each `640×480` frame to a square `224×224` wire image
+before sending it. For those square frames only, the server restores the
+intended geometry as follows:
 
 ```text
 224×224 square wire image
@@ -270,8 +279,9 @@ Pass the repository-owned debug root shown in the run command:
 ```
 
 The PNG files are the exact RGB `[0,1]` tensors presented to the LeRobot
-preprocessor, converted to uint8 for viewing. Each image is `224×224` with
-28 black rows at the top and bottom. `proprio.npy` contains the raw 14-D state
+preprocessor, converted to uint8 for viewing. With the current client each
+image is the native `640×480` frame; the model letterboxes it afterwards. With a
+legacy square client it is `224×224` with 28 black rows at the top and bottom. `proprio.npy` contains the raw 14-D state
 received from the robot. `input_state.npy` contains the adapted `(1,19)`
 checkpoint state, and `output_actions.npy` contains the final `(50,14)` client
 action chunk. `input_debug.json` also records the proprio values in readable
@@ -288,6 +298,7 @@ keeps these artifacts out of Git.
 | Tensor size 14 versus 19 in the normalizer | An old server process is passing the client state directly. Restart the updated server so it appends the five base zeros. |
 | `setting an array element with a sequence` after the first action chunk | An old server returned 7-D rows to a 14-D client waypoint. Restart the updated server and confirm the server prints `actions (50×14)`. |
 | Permission denied under `/tmp/pi05_debug` | Use `--debug_dir /home/saleha/lerobot-edge/logs/pi05_debug`. |
-| Images look stretched | Inspect the saved PNG. Correct output is `224×168` content centered inside a `224×224` black canvas. |
+| Images look stretched | Inspect the saved PNG. With the current client it should be an undistorted `640×480` frame. With a legacy square client, `224×168` content centered inside a `224×224` black canvas. |
+| Colours look swapped (a wood table appears blue) | The client and `--client_color_space` disagree. The current client sends RGB (the default); use `bgr` only with clients built before it stopped swapping channels. |
 | Unexpected behavior despite successful inference | Check `instruction.txt` and use an exact instruction from the selected checkpoint's training data. |
 | `KeyboardInterrupt` after pressing Ctrl-C | Normal server shutdown, not an inference failure. |
