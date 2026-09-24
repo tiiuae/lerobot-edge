@@ -219,6 +219,7 @@ class PolicyServer:
             )
             self._debug_writer_thread.start()
             logging.info("PolicyServer: debug I/O → %s", self._debug_dir)
+            self._install_model_input_capture()
 
     # ------------------------------------------------------------------
     # 1. Observation adaptation
@@ -378,6 +379,50 @@ class PolicyServer:
     # ------------------------------------------------------------------
     # 2. Debug helpers
     # ------------------------------------------------------------------
+
+    def _install_model_input_capture(self) -> None:
+        """Save, for each call, the exact images the vision encoder receives.
+
+        The input_*.png files are the tensors handed to the LeRobot
+        preprocessor, one step before the model: pi0.5's own _preprocess_images
+        still letterboxes them to 224x224 and maps them to [-1, 1]. This wraps
+        that method on this policy instance and writes its output, what SigLIP
+        actually ingests, as model_input_<camera>.png in the same call_NNNNN
+        directory.
+
+        Opened in any image viewer these must show true colours (the wood table
+        brown, not blue) and the 224x168 content with 28 black rows above and
+        below. They are converted back from [-1, 1] to 0-255 for viewing and are
+        otherwise unmodified; no channel reordering happens on the way to disk.
+
+        Only installed with --debug_dir. _preprocess_images runs outside the
+        torch.compile'd region (sample_actions), so --compile is unaffected.
+        """
+        original = self._policy._preprocess_images
+        image_keys = list(self._policy.config.image_features)
+        self._model_input_dir: Path | None = None
+
+        def capture_model_inputs(batch):
+            images, masks = original(batch)
+            call_dir = self._model_input_dir
+            if call_dir is not None:
+                # Same key order _preprocess_images uses; padded images for
+                # missing cameras come after these, and zip() leaves them out.
+                present = [key for key in image_keys if key in batch]
+                for key, image in zip(present, images, strict=False):
+                    frame = image[0].detach().to(torch.float32).clamp(-1.0, 1.0)
+                    if frame.shape[0] == 3:  # CHW -> HWC
+                        frame = frame.permute(1, 2, 0)
+                    rgb = ((frame + 1.0) * 127.5).round().to(torch.uint8).cpu().numpy()
+                    name = f"model_input_{key.rsplit('.', 1)[-1]}.png"
+                    self._debug_queue.put(lambda p=call_dir / name, a=rgb: _PIL_Image.fromarray(a).save(p))
+            return images, masks
+
+        self._policy._preprocess_images = capture_model_inputs
+        logging.info(
+            "PolicyServer: saving model_input_<camera>.png per call — the letterboxed RGB images "
+            "the vision encoder receives, after all preprocessing"
+        )
 
     def _debug_writer_loop(self) -> None:
         """Consume queued (path, write_fn) jobs off the request path.
@@ -667,12 +712,18 @@ class PolicyServer:
                 "an absolute rtc_query_step and a dynamic rtc_inference_delay",
                 _RTC_PROTOCOL_VERSION,
             )
-        actions = self._run_pipeline(
-            observation,
-            left_arm_hold,
-            rtc_query_step=rtc_query_step,
-            rtc_inference_delay=rtc_inference_delay,
-        )
+        if self._debug:
+            self._model_input_dir = call_dir
+        try:
+            actions = self._run_pipeline(
+                observation,
+                left_arm_hold,
+                rtc_query_step=rtc_query_step,
+                rtc_inference_delay=rtc_inference_delay,
+            )
+        finally:
+            if self._debug:
+                self._model_input_dir = None
         self._print_actions(actions, self._call_idx)
 
         # --- 4. (optional) save outputs ---
