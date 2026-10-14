@@ -1,32 +1,98 @@
 name: ci
-# Stub — the real workflow lives in tiiuae/dev-standard and updates centrally. Only the inputs are yours.
+# Copy of tiiuae/dev-standard's reusable .github/workflows/ci.yml at v1.3.1 (235c71b), with this repository's inputs
+# filled in. lerobot-edge is public and tiiuae/dev-standard is private, and GitHub lets a public repository call
+# reusable workflows only from public repositories, so the standard's stub (`uses: tiiuae/dev-standard/...@v1`)
+# cannot start here. Switch back to the stub once tiiuae/dev-standard is public (openspec/changes/adopt-standard,
+# task 4.5); until then, re-copy this file on every dev-standard upgrade.
+#
+# Inputs: src_paths 'deployment', test_paths 'tests/deployment', cov_source 'deployment', python_version '3.12',
+# ruff_blocking false, mypy_blocking false, patch_coverage 80, require_change true; js, cpp and docs are off, so
+# their jobs are left out. Job names keep the stub's check names ("ci / python", "ci / change-present").
+# Deviations from the copy, for this repository's zizmor policy: actions pinned to the commit their tag resolved to
+# on 2026-10-14, permissions granted per job instead of workflow-wide, and checkouts set persist-credentials: false
+# (no step pushes).
 on:
   pull_request:
   push:
     branches: [main]
 
-permissions:
-  contents: read
-  pull-requests: write
+permissions: {}
 
 jobs:
-  ci:
-    uses: tiiuae/dev-standard/.github/workflows/ci.yml@v1
-    with:
-      # Fork of huggingface/lerobot: only the team-owned code is linted, ratcheted and tested here.
-      # Upstream's suite keeps running in fast_tests.yml / full_tests.yml.
-      src_paths: 'deployment'
-      test_paths: 'tests/deployment'
-      cov_source: 'deployment'
+  python:
+    name: ci / python
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write # coverage comment on the PR
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with: { fetch-depth: 0, persist-credentials: false }
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
+        with:
+          python-version: "3.12"
+      - name: standard configs present
+        run: test -f .dev-standard/ruff.toml || { echo "::error::run install.sh from tiiuae/dev-standard first"; exit 1; }
       # No dependency groups: ruff and mypy come from the dev extra, pytest and pytest-cov from the test extra;
       # websockets and msgpack are the deployment server's transport (see deployment/DEPLOYMENT.md).
-      install_cmd: 'uv sync --locked --extra dev --extra test && uv pip install "websockets==17.0.1" "msgpack==1.2.1"'
-      python_version: '3.12'
-      ruff_blocking: false # true once `ruff check` and `ruff format --check` are clean on main (the ratchet blocks new violations meanwhile)
-      mypy_blocking: false
-      js: false
-      cpp: false
-      # docs: true # strict docs-site build on every PR (skill docs-site; runs `make docs`)
-    # No `secrets: inherit`: it would hand every repository secret to a workflow in another repo at the
-    # movable @v1 tag (zizmor secrets-inherit). GITHUB_TOKEN is always available to it; the only other secret
-    # it reads, DOCS_APPROVER_TOKEN, is optional (docs-only auto-approve, skipped without it).
+      - run: uv sync --locked --extra dev --extra test && uv pip install "websockets==17.0.1" "msgpack==1.2.1"
+      - name: ruff
+        run: uv run ruff check deployment tests/deployment && uv run ruff format --check deployment
+        # ruff_blocking: false — true once `ruff check` and `ruff format --check` are clean on main
+        continue-on-error: true
+      - name: mypy
+        run: uv run mypy deployment
+        # mypy_blocking: false
+        continue-on-error: true
+      - name: ratchet — no new lint or complexity/size violations vs main
+        if: github.event_name == 'pull_request'
+        run: OWNED_PATHS="deployment" RATCHET_RULES=both uv run python .dev-standard/ratchet.py
+      - name: tests
+        run: uv run pytest -q tests/deployment --cov=deployment --cov-report=xml --cov-report=term-missing
+      - name: patch coverage
+        if: github.event_name == 'pull_request'
+        run: uv run --with diff-cover diff-cover coverage.xml --compare-branch=origin/main --fail-under=80
+      - uses: py-cov-action/python-coverage-comment-action@50d15ff8768f6d897b04e5a0805bd1a98f7096c4  # v3
+        if: github.event_name == 'pull_request'
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MINIMUM_GREEN: 80
+          MINIMUM_ORANGE: 60
+      # gitleaks itself is free (MIT); only gitleaks-action needs a paid licence in organisations, so run the CLI.
+      # It reads .gitleaks.toml / .gitleaksignore from the repo, like the pre-commit hook does.
+      - name: gitleaks — no secrets in the new commits
+        env:
+          GITLEAKS_VERSION: "8.30.1"
+          GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+          RANGE: ${{ github.event_name == 'pull_request' && format('origin/{0}..HEAD', github.base_ref) || format('{0}..{1}', github.event.before, github.sha) }}
+        run: |
+          curl -sSfL -o /tmp/gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tgz" | sha256sum -c -
+          tar -xzf /tmp/gitleaks.tgz -C /tmp gitleaks
+          case "$RANGE" in 0000000*|..*) RANGE="-1" ;; esac  # first push of a branch, or no previous commit: scan the tip
+          /tmp/gitleaks git --log-opts="$RANGE" --redact --verbose --exit-code 1
+
+  change-present:
+    name: ci / change-present
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write # docs-only auto-approve
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with: { fetch-depth: 0, persist-credentials: false }
+      - name: code PR ⇒ openspec change folder; docs-only PR ⇒ auto-approve
+        id: check
+        run: |
+          CHANGED=$(git diff --name-only origin/main...HEAD)
+          if echo "$CHANGED" | grep -vqE '^(docs/|openspec/|README\.md|.*\.md$)'; then
+            echo "docs_only=false" >> $GITHUB_OUTPUT
+            echo "$CHANGED" | grep -qE '^openspec/changes/[^/]+/(proposal|design|tasks)\.md$' || ls openspec/changes/*/proposal.md >/dev/null 2>&1 || { echo "::error::no openspec/changes/<feature>/ for this code change — run /opsx:propose"; exit 1; }
+          else
+            echo "docs_only=true" >> $GITHUB_OUTPUT
+          fi
+      - uses: hmarr/auto-approve-action@05a696a09d381a5a0d142c755f7eacbb19eb6525  # v4 (branch)
+        if: steps.check.outputs.docs_only == 'true' && env.TOKEN != ''
+        env: { TOKEN: "${{ secrets.DOCS_APPROVER_TOKEN }}" }
+        with: { github-token: "${{ secrets.DOCS_APPROVER_TOKEN }}" }

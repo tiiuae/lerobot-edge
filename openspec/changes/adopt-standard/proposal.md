@@ -21,13 +21,13 @@ and code ownership, without a big-bang cleanup of existing code.
     so the import it writes into `CLAUDE.md` lands in `AGENTS.md` as a self-import.
   - `pyproject.toml`: `[tool.ruff.lint]` `select` / `ignore` renamed to `extend-select` / `extend-ignore`, so
     the repository's rules add to the team base instead of replacing it.
-  - `.github/workflows/ci.yml`: `src_paths` / `cov_source` set to `deployment` and `test_paths` to
-    `tests/deployment` (the team-owned code in this fork); `install_cmd` installs the `dev` and `test` extras
-    plus the server's `websockets` and `msgpack`; `python_version` set to `3.12` (`requires-python >= 3.12`).
+  - `.github/workflows/ci.yml` and `graph-on-merge.yml`: the installer's stubs replaced with copies of the team
+    workflows (dev-standard v1.3.1), because a public repository cannot call reusable workflows from the private
+    tiiuae/dev-standard. Inputs filled in: lint, ratchet and tests on `deployment/` and `tests/deployment/` (the
+    team-owned code in this fork); install the `dev` and `test` extras plus the server's `websockets` and `msgpack`;
+    Python `3.12` (`requires-python >= 3.12`); docs off. Actions are pinned to commit SHAs, permissions are per job,
+    and checkouts that don't push set `persist-credentials: false`, as this repository's zizmor policy requires.
   - `CODEOWNERS`: `@salehaalbreiki` and `@ibrahimkhadraoui` own every path; the `<docs-bot>` entries are dropped.
-  - `.github/workflows/ci.yml`: no `secrets: inherit` (zizmor `secrets-inherit`): it would pass every repository
-    secret to a workflow in another repository at the movable `@v1` tag. `GITHUB_TOKEN` is always available to the
-    called workflow; its only other secret, `DOCS_APPROVER_TOKEN`, is optional.
   - `.pre-commit-config.yaml`: the bandit and mypy hooks exclude `.dev-standard/`, which is vendored and overwritten
     by `install.sh` (the team ruff base already excludes it). They flagged the vendored `ratchet.py`.
 
@@ -49,9 +49,7 @@ None.
   `pre-commit run --all-files` on every PR, so that job fails until this is resolved (see tasks).
 - New CI (`ci.yml`) lints, type-checks, ratchets and tests only `deployment/` and `tests/deployment/`; ruff and
   mypy are non-blocking until that code is clean.
-- Without `secrets: inherit`, docs-only PRs are not auto-approved even if `DOCS_APPROVER_TOKEN` is set.
 - `deployment/` is on `main` (#2), so CI compares like for like: every blocking `ci / python` step passes locally
   against `origin/main` (ratchet 7 → 7 size, 88 → 88 lint; tests; patch coverage; gitleaks; change folder).
-- `ci.yml` cannot start on this repository yet: lerobot-edge is public and tiiuae/dev-standard is private, and GitHub
-  does not let a public repository call a reusable workflow from a private one (startup failure, no jobs). One of the
-  two must change visibility (see tasks).
+- The copied workflows run on this public repository today, but no longer update when dev-standard does: re-copy
+  them on every dev-standard upgrade, and switch back to the stubs once tiiuae/dev-standard is public (see tasks).

@@ -1,4 +1,11 @@
 name: graph-on-merge
+# Copy of tiiuae/dev-standard's reusable .github/workflows/graph-on-merge.yml at v1.3.1 (235c71b), with this
+# repository's inputs filled in: docs false, archify true. lerobot-edge is public and tiiuae/dev-standard is private,
+# and GitHub lets a public repository call reusable workflows only from public repositories, so the standard's stub
+# cannot start here. Switch back to the stub once tiiuae/dev-standard is public (openspec/changes/adopt-standard,
+# task 4.5); until then, re-copy this file on every dev-standard upgrade. With docs false, the docs step and the
+# pages job are left out, and so is the `pages: write` permission they need. Actions are pinned to the commit their
+# tag resolved to on 2026-10-14 (this repository's zizmor policy).
 on:
   push:
     branches: [main]
@@ -7,14 +14,34 @@ on:
 permissions:
   contents: write
   id-token: write
-  pages: write # docs site (docs: true with docs_cmd)
+
+concurrency: { group: standard-graph-on-main, cancel-in-progress: true }
 
 jobs:
-  graph:
-    uses: tiiuae/dev-standard/.github/workflows/graph-on-merge.yml@v1
-    with:
-      docs: false # true once the repo has a docs site (skill docs-site), with:
-      # docs_cmd: make docs # builds docs/_build/html, published to GitHub Pages (source: GitHub Actions)
-      archify: true
-    secrets:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+  regenerate:
+    runs-on: ubuntu-latest
+    steps:
+      # Credentials stay persisted: git-auto-commit-action pushes the regenerated files with them.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with: { fetch-depth: 0, submodules: false }  # zizmor: ignore[artipacked]
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
+      - run: uv tool install graphifyy
+      - name: graphify
+        run: graphify update . 2>/dev/null || graphify . --output graphify-out
+      - name: archify diagrams (agent-driven; skipped without ANTHROPIC_API_KEY)
+        if: env.KEY != ''
+        env: { KEY: "${{ secrets.ANTHROPIC_API_KEY }}" }
+        uses: anthropics/claude-code-action@34968b5981d5d170904281aa3df6f3c0d4a28855  # v1.0.249
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: "--max-turns 25"
+          prompt: |
+            Install archify (`npx -y skills add tt-a1i/archify -y`) and regenerate docs/diagrams/architecture.html
+            from the current module structure. Update the module table in docs/architecture.md only where the
+            structure changed. Touch no other file.
+      - uses: stefanzweifel/git-auto-commit-action@b863ae1933cb653a53c021fe36dbb774e1fb9403  # v5.2.0
+        with:
+          commit_message: "chore(docs): regenerate graph and diagrams [skip ci]"
+          file_pattern: "graphify-out/graph.json graphify-out/GRAPH_REPORT.md docs/diagrams/** docs/architecture.md"
+          commit_user_name: docs-bot
+          commit_user_email: docs-bot@users.noreply.github.com
