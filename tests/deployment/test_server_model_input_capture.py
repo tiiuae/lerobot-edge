@@ -12,8 +12,12 @@ import threading
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 import torch
 from PIL import Image
+
+pytest.importorskip("websockets", reason="websockets is required (see deployment/DEPLOYMENT.md)")
+pytest.importorskip("msgpack", reason="msgpack is required (see deployment/DEPLOYMENT.md)")
 
 from deployment.model_server.server_policy import PolicyServer
 from lerobot.policies.pi05.modeling_pi05 import PI05Policy

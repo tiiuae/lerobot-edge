@@ -4,6 +4,9 @@ import numpy as np
 import pytest
 import torch
 
+pytest.importorskip("websockets", reason="websockets is required (see deployment/DEPLOYMENT.md)")
+pytest.importorskip("msgpack", reason="msgpack is required (see deployment/DEPLOYMENT.md)")
+
 from deployment.model_server.server_policy import PolicyServer
 from lerobot.configs import RTCAttentionSchedule
 from lerobot.policies.rtc import RTCConfig
