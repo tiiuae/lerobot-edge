@@ -1,0 +1,33 @@
+# Team base config. A repo's pyproject.toml / ruff.toml sets `extend = ".dev-standard/ruff.toml"` and adds
+# only paths, per-file-ignores and anything STRICTER. Do not edit this vendored copy; re-run install.sh.
+line-length = 100
+target-version = "py311"
+# A path with "/" resolves against this file's directory (.dev-standard/ once vendored), hence "../docs/reference".
+extend-exclude = [".dev-standard", "vendor", "third_party", "external", "graphify-out", "../docs/reference", ".venv"]
+
+[lint]
+select = ["E", "F", "W", "I", "N", "D", "UP", "B", "C4", "SIM", "PL", "C90", "S", "ANN", "ASYNC"]
+ignore = [
+  "D203", "D213",                 # docstring style choices (Google)
+  "PLR2004", "PLR0913",           # magic values / arg count: judgement calls
+  "S101", "S603", "S607", "S104", # assert; subprocess with known args; bind 0.0.0.0 in containers
+  "B008", "PLC0415",              # FastAPI Depends() defaults; deliberate lazy imports
+]
+
+# Size limits (STANDARD.md). PLR0915/PLR0912/PLR0911/C901 are ratcheted in CI: a PR may not add violations.
+[lint.pylint]
+max-statements = 50
+max-branches = 12
+max-returns = 6
+max-args = 6
+
+[lint.mccabe]
+max-complexity = 10
+
+[lint.pydocstyle]
+convention = "google"
+
+[lint.per-file-ignores]   # "../" for the same reason as in extend-exclude; a bare file name matches anywhere
+"../**/tests/**" = ["D", "ANN", "PLR", "S105", "S106"]
+"../**/scripts/**" = ["D", "ANN", "S"]
+"conftest.py" = ["D", "ANN"]
