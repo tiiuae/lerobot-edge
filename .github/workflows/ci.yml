@@ -1,0 +1,30 @@
+name: ci
+# Stub — the real workflow lives in tiiuae/dev-standard and updates centrally. Only the inputs are yours.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  ci:
+    uses: tiiuae/dev-standard/.github/workflows/ci.yml@v1
+    with:
+      # Fork of huggingface/lerobot: only the team-owned code is linted, ratcheted and tested here.
+      # Upstream's suite keeps running in fast_tests.yml / full_tests.yml.
+      src_paths: 'deployment'
+      test_paths: 'tests/deployment'
+      cov_source: 'deployment'
+      # No dependency groups: ruff and mypy come from the dev extra, pytest and pytest-cov from the test extra;
+      # websockets and msgpack are the deployment server's transport (see deployment/DEPLOYMENT.md).
+      install_cmd: 'uv sync --locked --extra dev --extra test && uv pip install "websockets==17.0.1" "msgpack==1.2.1"'
+      python_version: '3.12'
+      ruff_blocking: false # true once `ruff check` and `ruff format --check` are clean on main (the ratchet blocks new violations meanwhile)
+      mypy_blocking: false
+      js: false
+      cpp: false
+      # docs: true # strict docs-site build on every PR (skill docs-site; runs `make docs`)
+    secrets: inherit
