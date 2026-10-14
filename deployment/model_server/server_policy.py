@@ -29,14 +29,15 @@ _C = "\033[36m"
 _R = "\033[0m"
 
 
-# Two independent axes, each with its own flag. --2_views and -7AD are not
-# coupled: known checkpoints exist for 3cam+7AD (all three views, 7-dim
-# right-arm-only state/action) as well as 2cam+7AD (pi05_aidrc_rightarm_2cam).
+# Two independent axes, each with its own flag. --two_views and --single_arm
+# are not coupled: known checkpoints exist for 3cam+single-arm (all three
+# views, 7-dim right-arm-only state/action) as well as 2cam+single-arm
+# (pi05_aidrc_rightarm_2cam).
 # _validate_checkpoint_config is what actually rejects a mismatched
 # checkpoint — these flags just select which of the four combinations to
 # validate against and adapt for.
 
-# Camera axis (--2_views selects _2CAM, default is _3CAM).
+# Camera axis (--two_views selects _2CAM, default is _3CAM).
 _CAMERA_MAP_3CAM = {
     "cam_high": "primary",
     "cam_left_wrist": "secondary",
@@ -58,14 +59,16 @@ _IMAGE_FEATURES_2CAM = {
     "observation.images.wrist": (3, 480, 640),
 }
 
-# State/action axis (-7AD selects _RIGHT7, default is _BIMANUAL_BASE).
+# State/action axis (--single_arm selects _RIGHT7, default is _BIMANUAL_BASE).
 _CHECKPOINT_STATE_DIM_BIMANUAL_BASE = 19  # left7 + right7 + base5
 _CHECKPOINT_ACTION_DIM_BIMANUAL_BASE = 16  # left7 + right7 + base_velocity2
 # Bare 7-dim right-arm state/action, no stationary-base padding. The left arm
 # is not modelled by the checkpoint at all; this deployment still holds it at
 # its measured pose (see _run_pipeline) so the client always gets a
 # homogeneous 14-joint action, same as the discarded left-arm prediction in
-# BIMANUAL_BASE mode.
+# BIMANUAL_BASE mode. Do not send the bare 7 columns: the aloha-webapp client
+# rejects replies narrower than its 14 robot joints and reads the right arm
+# from columns 7:14.
 _CHECKPOINT_STATE_DIM_RIGHT7 = 7
 _CHECKPOINT_ACTION_DIM_RIGHT7 = 7
 
@@ -1018,16 +1021,15 @@ def build_argparser():
         "compile time).",
     )
     p.add_argument(
-        "--2_views",
-        dest="two_views",
+        "--two_views",
         action="store_true",
         help="Serve a checkpoint with a 2-camera input (primary + wrist, "
         "positional) instead of the fixed 3-camera bimanual+base image set. "
-        "Independent of -7AD: known checkpoints exist for 2 views with 7AD "
-        "(pi05_aidrc_rightarm_2cam) and for 3 views with 7AD.",
+        "Independent of --single_arm: known checkpoints exist for 2 views with "
+        "--single_arm (pi05_aidrc_rightarm_2cam) and for 3 views with --single_arm.",
     )
     p.add_argument(
-        "-7AD",
+        "--single_arm",
         dest="right_arm_7d",
         action="store_true",
         help="Serve a checkpoint with a bare 7-dim right-arm state/action "
@@ -1035,7 +1037,7 @@ def build_argparser():
         "bimanual+base contract. The model never sees the left arm at all; "
         "this deployment holds it at its measured pose from the client's "
         "state, same as the default contract's discarded left-arm "
-        "prediction. Independent of --2_views.",
+        "prediction. Independent of --two_views.",
     )
     p.add_argument(
         "--rtc",
