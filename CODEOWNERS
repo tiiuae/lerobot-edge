@@ -1,5 +1,5 @@
 # One CODEOWNER approval is required on every PR (branch protection → "Require review from Code Owners").
-*                        @salehaalbreiki
-/.github/workflows/      @salehaalbreiki
-/docs/                   @salehaalbreiki
-/openspec/               @salehaalbreiki
+*                        @salehaalbreiki @ibrahimkhadraoui
+/.github/workflows/      @salehaalbreiki @ibrahimkhadraoui
+/docs/                   @salehaalbreiki @ibrahimkhadraoui
+/openspec/               @salehaalbreiki @ibrahimkhadraoui
