@@ -50,7 +50,8 @@ None.
 - New CI (`ci.yml`) lints, type-checks, ratchets and tests only `deployment/` and `tests/deployment/`; ruff and
   mypy are non-blocking until that code is clean.
 - Without `secrets: inherit`, docs-only PRs are not auto-approved even if `DOCS_APPROVER_TOKEN` is set.
-- Depends on #2 (`clean-up`), which brings `deployment/` to `main`. Before #2 merges, CI compares against a `main`
-  without `deployment/`: patch coverage fails (58% < 80%) and the ratchet passes only through a dev-standard bug that
-  lints the whole repository on the base (fixed in tiiuae/dev-standard#6). After #2 merges, every blocking check
-  passes locally (ratchet 7 → 7 size, 88 → 88 lint).
+- `deployment/` is on `main` (#2), so CI compares like for like: every blocking `ci / python` step passes locally
+  against `origin/main` (ratchet 7 → 7 size, 88 → 88 lint; tests; patch coverage; gitleaks; change folder).
+- `ci.yml` cannot start on this repository yet: lerobot-edge is public and tiiuae/dev-standard is private, and GitHub
+  does not let a public repository call a reusable workflow from a private one (startup failure, no jobs). One of the
+  two must change visibility (see tasks).

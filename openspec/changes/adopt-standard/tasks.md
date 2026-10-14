@@ -28,5 +28,6 @@
 
 - [ ] 4.1 Report to tiiuae/dev-standard that `install.sh` writes the `@AGENTS.md` import through a `CLAUDE.md -> AGENTS.md` symlink (it reappears on every re-run or upgrade) and verify an issue is filed
 - [x] 4.2 Fix `ratchet.py` linting the whole repository on the base side when an owned path does not exist there, upstream, and verify tiiuae/dev-standard#6 is open with tests
-- [ ] 4.3 Merge #2 (`clean-up`, brings `deployment/` to `main`) before this PR, and verify this PR's `ci / python` ratchet and patch-coverage steps pass against the updated `main`
+- [x] 4.3 Merge #2 (`clean-up`, brings `deployment/` to `main`) before this PR, and verify this PR's `ci / python` ratchet and patch-coverage steps pass against the updated `main` (locally: ratchet 7 → 7, 88 → 88; no covered lines in the diff)
+- [ ] 4.5 Make `ci.yml` able to start: tiiuae/dev-standard public (org owners) or lerobot-edge private, and verify `ci / python` and `ci / change-present` run on this PR
 - [ ] 4.4 Archive this change after the PR merges (`npx -y @fission-ai/openspec@1 archive adopt-standard --yes`) and verify `openspec/changes/adopt-standard/` has moved under `openspec/changes/archive/`
