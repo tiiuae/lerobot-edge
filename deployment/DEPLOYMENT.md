@@ -58,13 +58,13 @@ returns unguided chunks.
 
 Defaults:
 
-| Setting | Value |
-|---|---:|
-| Device | `cuda` |
-| Port | `8800` |
-| Idle timeout | disabled (`-1`) |
-| Action horizon | 50 steps |
-| Dataset frequency | 30 Hz |
+| Setting           |           Value |
+| ----------------- | --------------: |
+| Device            |          `cuda` |
+| Port              |          `8800` |
+| Idle timeout      | disabled (`-1`) |
+| Action horizon    |        50 steps |
+| Dataset frequency |           30 Hz |
 
 Optional CLI flags are `--device`, `--port`, `--idle_timeout`, `--debug_dir`,
 `--two_views`, `--single_arm`, and the `--rtc_*` settings. Camera mapping,
@@ -76,10 +76,10 @@ checkpoint layout; the two layout flags below only choose which layout to use.
 Two independent flags select the checkpoint layout. They are not coupled, so
 all four combinations are valid:
 
-| Flag | Default (flag omitted) | With the flag |
-|---|---|---|
-| `--two_views` | 3 cameras: `primary`, `secondary`, `wrist` | 2 cameras: `primary`, `wrist` |
-| `--single_arm` | 19-D state / 16-D action (bimanual + base) | 7-D right-arm state / action |
+| Flag           | Default (flag omitted)                     | With the flag                 |
+| -------------- | ------------------------------------------ | ----------------------------- |
+| `--two_views`  | 3 cameras: `primary`, `secondary`, `wrist` | 2 cameras: `primary`, `wrist` |
+| `--single_arm` | 19-D state / 16-D action (bimanual + base) | 7-D right-arm state / action  |
 
 Known checkpoints exist for 3 views with `--single_arm` and for 2 views with
 `--single_arm` (`pi05_aidrc_rightarm_2cam`). For example:
@@ -135,11 +135,11 @@ Add these fields to every inference request, next to `images`, `state`, and
 }
 ```
 
-| Field | Type | Meaning |
-|---|---|---|
-| `rtc_query_step` | int ≥ 0 | The client's 30 Hz control-step counter at the moment the observation was captured. It should increase with every request; a repeated or lower step gets no guidance. |
-| `rtc_inference_delay` | int ≥ 0 | How many control steps the robot will execute from the preceding chunk before this response is in use: the request round trip plus any time the observation waited to be sent, in 30 Hz steps, rounded up. A client that holds the robot still while it waits for the response sends `0`. |
-| `rtc_reset` | bool, default `False` | Clears the policy and RTC state before this request is processed. Any other type is rejected with an error. |
+| Field                 | Type                  | Meaning                                                                                                                                                                                                                                                                                   |
+| --------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rtc_query_step`      | int ≥ 0               | The client's 30 Hz control-step counter at the moment the observation was captured. It should increase with every request; a repeated or lower step gets no guidance.                                                                                                                     |
+| `rtc_inference_delay` | int ≥ 0               | How many control steps the robot will execute from the preceding chunk before this response is in use: the request round trip plus any time the observation waited to be sent, in 30 Hz steps, rounded up. A client that holds the robot still while it waits for the response sends `0`. |
+| `rtc_reset`           | bool, default `False` | Clears the policy and RTC state before this request is processed. Any other type is rejected with an error.                                                                                                                                                                               |
 
 Start the step counter again (for example from `0` at a new episode) only
 together with `rtc_reset: True`, a `{"type": "reset"}` message, or a prompt
@@ -185,29 +185,29 @@ the executed actions differ from the prefix the server guides with.
 
 The response carries `actions` with shape `(50, 14)` plus:
 
-| Field | Meaning |
-|---|---|
-| `rtc_query_step` | The request's `rtc_query_step`, or `None` if it was missing or invalid. Use it to match the response to its request. |
-| `rtc_guidance_applied` | `True` if the chunk was guided by the preceding chunk. |
-| `rtc_query_delta` | `query_delta` as above (negative for a stale request), or `None` if it could not be computed. |
-| `rtc_overlap_horizon` | `overlap_horizon` as above, or `None` if it was not computed. |
-| `rtc_inference_delay` | The request's `rtc_inference_delay`, or `None` if it was missing or invalid. |
-| `rtc_skip_reason` | `None` when guidance was applied, otherwise one of the reasons below. |
+| Field                  | Meaning                                                                                                              |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `rtc_query_step`       | The request's `rtc_query_step`, or `None` if it was missing or invalid. Use it to match the response to its request. |
+| `rtc_guidance_applied` | `True` if the chunk was guided by the preceding chunk.                                                               |
+| `rtc_query_delta`      | `query_delta` as above (negative for a stale request), or `None` if it could not be computed.                        |
+| `rtc_overlap_horizon`  | `overlap_horizon` as above, or `None` if it was not computed.                                                        |
+| `rtc_inference_delay`  | The request's `rtc_inference_delay`, or `None` if it was missing or invalid.                                         |
+| `rtc_skip_reason`      | `None` when guidance was applied, otherwise one of the reasons below.                                                |
 
 ### When guidance is skipped
 
 A request that cannot be guided still returns a normal, unguided chunk. Whether
 that chunk becomes the reference for the next request depends on the reason:
 
-| `rtc_skip_reason` | Cause | Chunk kept for the next request |
-|---|---|---|
-| `no_previous_chunk` | First request, the first after a reset or prompt change, or the first after a request without a valid `rtc_query_step` | This chunk |
-| `missing_rtc_query_step`, `invalid_rtc_query_step` | `rtc_query_step` absent, negative, or not an integer | None: the stored chunk is cleared, because the response cannot be placed in time |
-| `non_increasing_query_step` | `rtc_query_step` is lower than the preceding one (stale request) | The preceding chunk is kept |
-| `non_increasing_query_step` | `rtc_query_step` equals the preceding one | This chunk |
-| `no_remaining_overlap` | `query_delta` ≥ 50: the preceding chunk has run out | This chunk |
-| `missing_rtc_inference_delay`, `invalid_rtc_inference_delay` | `rtc_inference_delay` absent, negative, or not an integer | This chunk |
-| `inference_delay_exhausts_overlap` | `rtc_inference_delay` ≥ `overlap_horizon`: the response would arrive after the preceding chunk ends | This chunk |
+| `rtc_skip_reason`                                            | Cause                                                                                                                  | Chunk kept for the next request                                                  |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `no_previous_chunk`                                          | First request, the first after a reset or prompt change, or the first after a request without a valid `rtc_query_step` | This chunk                                                                       |
+| `missing_rtc_query_step`, `invalid_rtc_query_step`           | `rtc_query_step` absent, negative, or not an integer                                                                   | None: the stored chunk is cleared, because the response cannot be placed in time |
+| `non_increasing_query_step`                                  | `rtc_query_step` is lower than the preceding one (stale request)                                                       | The preceding chunk is kept                                                      |
+| `non_increasing_query_step`                                  | `rtc_query_step` equals the preceding one                                                                              | This chunk                                                                       |
+| `no_remaining_overlap`                                       | `query_delta` ≥ 50: the preceding chunk has run out                                                                    | This chunk                                                                       |
+| `missing_rtc_inference_delay`, `invalid_rtc_inference_delay` | `rtc_inference_delay` absent, negative, or not an integer                                                              | This chunk                                                                       |
+| `inference_delay_exhausts_overlap`                           | `rtc_inference_delay` ≥ `overlap_horizon`: the response would arrive after the preceding chunk ends                    | This chunk                                                                       |
 
 ### Resets and prompt changes
 
@@ -220,13 +220,13 @@ so prompt changes are safe during one long client episode (for example with
 
 ### RTC flags
 
-| Flag | Default | Effect |
-|---|---|---|
-| `--rtc` | off | Enables RTC. |
-| `--rtc_max_guidance_weight` | `12.0` | Upper limit on the guidance strength. LeRobot recommends `10.0` for 10-step flow matching. |
-| `--rtc_attention_schedule` | `EXP` | Guidance weight between `rtc_inference_delay` and `overlap_horizon`: `EXP` and `LINEAR` decay to zero, `ONES` keeps full weight, `ZEROS` guides only the first `rtc_inference_delay` steps. |
-| `--rtc_inference_delay` | `4` | Not used for guidance. It is only logged and reported in the server metadata; each request supplies its own `rtc_inference_delay`. Must be between 0 and 50. |
-| `--rtc_execution_horizon` | `50` | Not used for live requests; the server derives `overlap_horizon` per request. Must be between 1 and 50. |
+| Flag                        | Default | Effect                                                                                                                                                                                      |
+| --------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--rtc`                     | off     | Enables RTC.                                                                                                                                                                                |
+| `--rtc_max_guidance_weight` | `12.0`  | Upper limit on the guidance strength. LeRobot recommends `10.0` for 10-step flow matching.                                                                                                  |
+| `--rtc_attention_schedule`  | `EXP`   | Guidance weight between `rtc_inference_delay` and `overlap_horizon`: `EXP` and `LINEAR` decay to zero, `ONES` keeps full weight, `ZEROS` guides only the first `rtc_inference_delay` steps. |
+| `--rtc_inference_delay`     | `4`     | Not used for guidance. It is only logged and reported in the server metadata; each request supplies its own `rtc_inference_delay`. Must be between 0 and 50.                                |
+| `--rtc_execution_horizon`   | `50`    | Not used for live requests; the server derives `overlap_horizon` per request. Must be between 1 and 50.                                                                                     |
 
 ## Compatible checkpoint contract
 
@@ -234,16 +234,16 @@ This server is not tied to one checkpoint path, but every checkpoint must use
 the same Trossen feature layout. The server validates this contract at
 startup:
 
-| Checkpoint field | Required value |
-|---|---|
-| Policy type | `pi05` |
-| Images | `primary`, `secondary`, `wrist`, each `(3,480,640)`; with `--two_views`: `primary`, `wrist` |
-| State | 19-D: `left7 + right7 + base5`; with `--single_arm`: 7-D `right7` |
-| Action | 16-D: `left7 + right7 + base_velocity2`; with `--single_arm`: 7-D `right7` |
-| Action representation | absolute |
-| Observation steps | 1 |
-| Chunk/action steps | 50 |
-| Model image resolution | `(224,224)` |
+| Checkpoint field       | Required value                                                                              |
+| ---------------------- | ------------------------------------------------------------------------------------------- |
+| Policy type            | `pi05`                                                                                      |
+| Images                 | `primary`, `secondary`, `wrist`, each `(3,480,640)`; with `--two_views`: `primary`, `wrist` |
+| State                  | 19-D: `left7 + right7 + base5`; with `--single_arm`: 7-D `right7`                           |
+| Action                 | 16-D: `left7 + right7 + base_velocity2`; with `--single_arm`: 7-D `right7`                  |
+| Action representation  | absolute                                                                                    |
+| Observation steps      | 1                                                                                           |
+| Chunk/action steps     | 50                                                                                          |
+| Model image resolution | `(224,224)`                                                                                 |
 
 Checkpoints with different feature names, ordering, or state/action layouts
 need a different adapter and are rejected instead of being silently remapped.
@@ -275,11 +275,11 @@ frames are restored to the 4:3 letterbox (see below). The default is `rgb`.
 
 Camera mapping is fixed:
 
-| Client key | Checkpoint feature |
-|---|---|
-| `cam_high` | `observation.images.primary` |
-| `cam_left_wrist` | `observation.images.secondary` |
-| `cam_right_wrist` | `observation.images.wrist` |
+| Client key        | Checkpoint feature             |
+| ----------------- | ------------------------------ |
+| `cam_high`        | `observation.images.primary`   |
+| `cam_left_wrist`  | `observation.images.secondary` |
+| `cam_right_wrist` | `observation.images.wrist`     |
 
 All three cameras are required. With `--two_views`, only `cam_high`
 (`primary`) and `cam_right_wrist` (`wrist`) are required; `cam_left_wrist` is
@@ -341,10 +341,10 @@ parity would require the client to send the original `640×480` frame.
 
 The robot sends 14 live arm values:
 
-| Client dimensions | Meaning |
-|---|---|
-| `0:7` | left arm: 6 joints + gripper |
-| `7:14` | right arm: 6 joints + gripper |
+| Client dimensions | Meaning                       |
+| ----------------- | ----------------------------- |
+| `0:7`             | left arm: 6 joints + gripper  |
+| `7:14`            | right arm: 6 joints + gripper |
 
 The checkpoint normalizer requires a 19-dimensional state. The server always
 appends the five stationary mobile-base fields:
@@ -371,11 +371,11 @@ checkpoint state7 = client state[7:14] = right7
 
 The checkpoint produces 16 absolute action values per timestep:
 
-| Raw dimensions | Meaning | Deployment behavior |
-|---|---|---|
-| `0:7` | predicted left arm | ignored |
-| `7:14` | predicted right arm | used |
-| `14:16` | base velocity channels | ignored |
+| Raw dimensions | Meaning                | Deployment behavior |
+| -------------- | ---------------------- | ------------------- |
+| `0:7`          | predicted left arm     | ignored             |
+| `7:14`         | predicted right arm    | used                |
+| `14:16`        | base velocity channels | ignored             |
 
 The server returns a homogeneous 14-dimensional action to the client:
 
@@ -394,11 +394,11 @@ client's first-waypoint and action-ensemble code.
 Do not change the checkpoint dimensions to 14. The client and checkpoint interfaces are
 deliberately different:
 
-| Interface | State dimension | Action dimension |
-|---|---:|---:|
-| Robot/OpenPI client | 14 | 14 |
-| Compatible π0.5 checkpoint | 19 | 16 |
-| Compatible π0.5 checkpoint, `--single_arm` | 7 | 7 |
+| Interface                                  | State dimension | Action dimension |
+| ------------------------------------------ | --------------: | ---------------: |
+| Robot/OpenPI client                        |              14 |               14 |
+| Compatible π0.5 checkpoint                 |              19 |               16 |
+| Compatible π0.5 checkpoint, `--single_arm` |               7 |                7 |
 
 ## Language instructions
 
@@ -442,12 +442,12 @@ keeps these artifacts out of Git.
 
 ## Troubleshooting
 
-| Error or symptom | Meaning / fix |
-|---|---|
-| Tensor size 14 versus 19 in the normalizer | An old server process is passing the client state directly. Restart the updated server so it appends the five base zeros. |
-| `setting an array element with a sequence` after the first action chunk | An old server returned 7-D rows to a 14-D client waypoint. Restart the updated server and confirm the server prints `actions (50×14)`. |
-| Permission denied under `/tmp/pi05_debug` | Use `--debug_dir /home/saleha/lerobot-edge/logs/pi05_debug`. |
-| Images look stretched | Inspect the saved PNG. With the current client it should be an undistorted `640×480` frame. With a legacy square client, `224×168` content centered inside a `224×224` black canvas. |
-| Colours look swapped (a wood table appears blue) | The client and `--client_color_space` disagree. The current client sends RGB (the default); use `bgr` only with clients built before it stopped swapping channels. |
-| Unexpected behavior despite successful inference | Check `instruction.txt` and use an exact instruction from the selected checkpoint's training data. |
-| `KeyboardInterrupt` after pressing Ctrl-C | Normal server shutdown, not an inference failure. |
+| Error or symptom                                                        | Meaning / fix                                                                                                                                                                        |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Tensor size 14 versus 19 in the normalizer                              | An old server process is passing the client state directly. Restart the updated server so it appends the five base zeros.                                                            |
+| `setting an array element with a sequence` after the first action chunk | An old server returned 7-D rows to a 14-D client waypoint. Restart the updated server and confirm the server prints `actions (50×14)`.                                               |
+| Permission denied under `/tmp/pi05_debug`                               | Use `--debug_dir /home/saleha/lerobot-edge/logs/pi05_debug`.                                                                                                                         |
+| Images look stretched                                                   | Inspect the saved PNG. With the current client it should be an undistorted `640×480` frame. With a legacy square client, `224×168` content centered inside a `224×224` black canvas. |
+| Colours look swapped (a wood table appears blue)                        | The client and `--client_color_space` disagree. The current client sends RGB (the default); use `bgr` only with clients built before it stopped swapping channels.                   |
+| Unexpected behavior despite successful inference                        | Check `instruction.txt` and use an exact instruction from the selected checkpoint's training data.                                                                                   |
+| `KeyboardInterrupt` after pressing Ctrl-C                               | Normal server shutdown, not an inference failure.                                                                                                                                    |

@@ -152,4 +152,3 @@ def test_nothing_is_written_outside_a_call(tmp_path):
 def test_no_capture_without_debug_dir():
     server = PolicyServer(policy=_FakePolicy(), preprocessor=lambda v: v, postprocessor=lambda v: v)
     assert server._policy._preprocess_images.__name__ == "_preprocess_images"
-

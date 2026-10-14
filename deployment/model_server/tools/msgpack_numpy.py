@@ -19,6 +19,7 @@ import numpy as np
 
 
 def pack_array(obj):
+    """Encode a NumPy array or scalar as a msgpack-friendly dict; leave other objects unchanged."""
     if (isinstance(obj, (np.ndarray, np.generic))) and obj.dtype.kind in ("V", "O", "c"):
         raise ValueError(f"Unsupported dtype: {obj.dtype}")
 
@@ -41,6 +42,7 @@ def pack_array(obj):
 
 
 def unpack_array(obj):
+    """Decode a dict made by `pack_array` back into a NumPy array or scalar; leave other dicts unchanged."""
     if b"__ndarray__" in obj:
         return np.ndarray(buffer=obj[b"data"], dtype=np.dtype(obj[b"dtype"]), shape=obj[b"shape"])
 

@@ -1,4 +1,4 @@
-
+"""pi0.5 deployment server: serves a LeRobot pi0.5 checkpoint to Trossen/OpenPI robot clients over WebSocket."""
 
 import argparse
 import json
@@ -10,6 +10,7 @@ import time
 from datetime import UTC, datetime
 from numbers import Integral
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch
@@ -88,8 +89,7 @@ _REPOSITORY_DEBUG_ROOT = _REPOSITORY_ROOT / "logs" / "pi05_debug"
 
 
 class PolicyServer:
-    """
-    Fixed adapter between the Trossen OpenPI client and the AIDRC pi0.5 policy.
+    """Fixed adapter between the Trossen OpenPI client and the AIDRC pi0.5 policy.
 
     Responsibilities:
       1. Observation adaptation  — translates the openpi-client format
@@ -132,6 +132,18 @@ class PolicyServer:
         right_arm_7d: bool = False,
         client_color_space: str = "rgb",
     ) -> None:
+        """Wrap a loaded policy and its processors for the fixed client contract.
+
+        Args:
+            policy: Loaded pi0.5 policy.
+            preprocessor: The policy's preprocessor pipeline.
+            postprocessor: The policy's postprocessor pipeline.
+            debug_dir: Root directory for per-call debug files; None disables them.
+            rtc_inference_delay: Legacy RTC latency hint, only logged (requests carry their own).
+            two_views: The checkpoint takes 2 cameras (primary, wrist) instead of 3.
+            right_arm_7d: The checkpoint's state and action are the bare 7-dim right arm.
+            client_color_space: Channel order of the client's images, "rgb" or "bgr".
+        """
         if client_color_space not in ("rgb", "bgr"):
             raise ValueError(f"client_color_space must be 'rgb' or 'bgr', got {client_color_space!r}")
         self._client_color_space = client_color_space
@@ -178,8 +190,7 @@ class PolicyServer:
         self._image_shapes = dict(_IMAGE_FEATURES_2CAM if self._two_views else _IMAGE_FEATURES_3CAM)
         self._model_image_size = (224, 224)
         logging.info(
-            "PolicyServer: device=%s, camera_map=%s, client_color_space=%s, "
-            "two_views=%s, right_arm_7d=%s",
+            "PolicyServer: device=%s, camera_map=%s, client_color_space=%s, two_views=%s, right_arm_7d=%s",
             self._device,
             self._camera_map,
             self._client_color_space,
@@ -199,7 +210,7 @@ class PolicyServer:
             self._client_color_space.upper(),
         )
 
-        if self._debug:
+        if debug_dir is not None:  # same as self._debug, set above
             debug_root = Path(debug_dir).expanduser()
             run_name = datetime.now(UTC).strftime("run_%Y%m%dT%H%M%S_%fZ")
             self._debug_dir = debug_root / run_name
@@ -210,7 +221,7 @@ class PolicyServer:
                     f"Could not create a debug run directory under {debug_root}: {exc}. "
                     f"Use --debug_dir {_REPOSITORY_DEBUG_ROOT}"
                 ) from exc
-            # Disk writes (PNGs, JSON, .npy) are queued to a background thread
+            # Disk writes (PNG images, JSON, .npy) are queued to a background thread
             # instead of running inline in predict_action(). With RTC enabled,
             # the client times the whole request/response round trip to
             # forecast rtc_inference_delay; synchronous debug I/O on this path
@@ -310,7 +321,7 @@ class PolicyServer:
         return t.unsqueeze(0).contiguous()
 
     def _adapt_example(self, ex: dict) -> tuple[dict, np.ndarray]:
-        """openpi client format → (lerobot Observation dict, left-arm hold pose).
+        """Openpi client format → (lerobot Observation dict, left-arm hold pose).
 
         The left-arm hold pose is always read from the client's raw 14-dim
         state (indices 0:7), never from ``observation[OBS_STATE]``: in
@@ -329,8 +340,7 @@ class PolicyServer:
             extra_cameras -= {"cam_left_wrist"}
         if missing_cameras:
             raise ValueError(
-                f"checkpoint requires camera(s) {sorted(self._camera_map)}; "
-                f"missing {sorted(missing_cameras)}"
+                f"checkpoint requires camera(s) {sorted(self._camera_map)}; missing {sorted(missing_cameras)}"
             )
         if extra_cameras:
             raise ValueError(f"checkpoint does not accept extra cameras: {sorted(extra_cameras)}")
@@ -349,9 +359,7 @@ class PolicyServer:
         if not torch.isfinite(s).all():
             raise ValueError("AIDRC arm state contains NaN or infinite values")
         if s.shape[1] != _CLIENT_STATE_DIM:
-            raise ValueError(
-                f"OpenPI must send {_CLIENT_STATE_DIM} arm-state values; got {s.shape[1]}"
-            )
+            raise ValueError(f"OpenPI must send {_CLIENT_STATE_DIM} arm-state values; got {s.shape[1]}")
 
         # Preserve the currently measured left-arm pose before any
         # truncation/padding below. The model never predicts the left arm
@@ -444,14 +452,16 @@ class PolicyServer:
                 logging.exception("PolicyServer: debug write failed")
 
     def _save_inputs(self, call_dir: Path, ex: dict, observation: dict) -> None:
-        """Compute the exact RGB images/state passed to the LeRobot preprocessor,
-        then queue the disk writes so this stays off the synchronous inference path."""
+        """Queue the exact RGB images and state passed to the LeRobot preprocessor for writing to disk.
+
+        The writes run on a background thread, so this stays off the synchronous inference path.
+        """
         lang = ex.get("prompt") or ex.get("lang") or ex.get("task")
         if lang:
             text = str(lang)
             self._debug_queue.put(lambda p=call_dir / "instruction.txt", t=text: p.write_text(t))
 
-        manifest = {
+        manifest: dict[str, Any] = {
             "call_idx": self._call_idx,
             "image_convention": (
                 "RGB CHW float32 [0,1]; native frames as received (pi0.5 letterboxes them), "
@@ -524,7 +534,7 @@ class PolicyServer:
         rtc_query_step=None,
         rtc_inference_delay=None,
     ) -> np.ndarray:
-        """preprocessor → policy.predict_action_chunk → postprocessor → (T, D) ndarray.
+        """Preprocessor → policy.predict_action_chunk → postprocessor → (T, D) ndarray.
 
         ``left_arm_hold`` is the measured left-arm pose from the raw client
         request (see ``_adapt_example``), not derived from ``observation``
@@ -535,13 +545,11 @@ class PolicyServer:
 
         predict_kwargs = {}
         if self._rtc_config is not None and self._rtc_config.enabled:
-            query_step, query_step_error = self._parse_rtc_step(
-                rtc_query_step, "rtc_query_step"
-            )
+            query_step, query_step_error = self._parse_rtc_step(rtc_query_step, "rtc_query_step")
             inference_delay, inference_delay_error = self._parse_rtc_step(
                 rtc_inference_delay, "rtc_inference_delay"
             )
-            rtc_metadata = {
+            rtc_metadata: dict[str, Any] = {
                 "rtc_query_step": query_step,
                 "rtc_guidance_applied": False,
                 "rtc_query_delta": None,
@@ -550,7 +558,7 @@ class PolicyServer:
                 "rtc_skip_reason": None,
             }
 
-            if query_step_error is not None:
+            if query_step is None:  # _parse_rtc_step returns a step or an error, never both
                 rtc_metadata["rtc_skip_reason"] = query_step_error
             elif self._previous_action_chunk is None or self._previous_query_step is None:
                 rtc_metadata["rtc_skip_reason"] = "no_previous_chunk"
@@ -578,18 +586,14 @@ class PolicyServer:
                         # not a static execution-horizon truncation.
                         predict_kwargs = {
                             "inference_delay": inference_delay,
-                            "prev_chunk_left_over": self._previous_action_chunk[
-                                :, query_delta:
-                            ],
+                            "prev_chunk_left_over": self._previous_action_chunk[:, query_delta:],
                             "execution_horizon": overlap_horizon,
                         }
                         rtc_metadata["rtc_guidance_applied"] = True
 
             self._last_rtc_metadata = rtc_metadata
 
-        chunk = self._policy.predict_action_chunk(
-            observation, **predict_kwargs
-        )  # (B, T, D) or (B, D)
+        chunk = self._policy.predict_action_chunk(observation, **predict_kwargs)  # (B, T, D) or (B, D)
         if chunk.ndim != 3:
             chunk = chunk.unsqueeze(0)  # → (B, 1, D)
         if chunk.shape != (1, 50, self._checkpoint_action_dim):
@@ -609,8 +613,7 @@ class PolicyServer:
                 self._previous_action_chunk = None
                 self._previous_query_step = None
             elif (
-                skip_reason != "non_increasing_query_step"
-                or self._last_rtc_metadata["rtc_query_delta"] == 0
+                skip_reason != "non_increasing_query_step" or self._last_rtc_metadata["rtc_query_delta"] == 0
             ):
                 self._previous_action_chunk = chunk.detach().clone()
                 self._previous_query_step = query_step
@@ -659,6 +662,7 @@ class PolicyServer:
     # ------------------------------------------------------------------
 
     def predict_action(self, examples=None, **kwargs) -> dict:
+        """Answer one client request: `{"actions": (50, 14)}` plus RTC metadata when RTC is enabled."""
         if examples is None:
             examples = []
         if not isinstance(examples, list):
@@ -701,9 +705,7 @@ class PolicyServer:
 
         # --- 3. Run pipeline ---
         rtc_query_step = kwargs.get("rtc_query_step", ex.get("rtc_query_step"))
-        rtc_inference_delay = kwargs.get(
-            "rtc_inference_delay", ex.get("rtc_inference_delay")
-        )
+        rtc_inference_delay = kwargs.get("rtc_inference_delay", ex.get("rtc_inference_delay"))
         if (
             self._rtc_config is not None
             and self._rtc_config.enabled
@@ -737,6 +739,7 @@ class PolicyServer:
         return {"actions": actions, **self._last_rtc_metadata}
 
     def reset(self) -> None:
+        """Clear the policy's and RTC's per-episode state."""
         if hasattr(self._policy, "reset"):
             self._policy.reset()
         self._previous_action_chunk = None
@@ -772,7 +775,9 @@ def _validate_checkpoint_config(config, *, two_views: bool = False, right_arm_7d
 
     expected_images = _IMAGE_FEATURES_2CAM if two_views else _IMAGE_FEATURES_3CAM
     expected_state_dim = _CHECKPOINT_STATE_DIM_RIGHT7 if right_arm_7d else _CHECKPOINT_STATE_DIM_BIMANUAL_BASE
-    expected_action_dim = _CHECKPOINT_ACTION_DIM_RIGHT7 if right_arm_7d else _CHECKPOINT_ACTION_DIM_BIMANUAL_BASE
+    expected_action_dim = (
+        _CHECKPOINT_ACTION_DIM_RIGHT7 if right_arm_7d else _CHECKPOINT_ACTION_DIM_BIMANUAL_BASE
+    )
 
     image_features = getattr(config, "image_features", {}) or {}
     actual_images = {key: tuple(feature.shape) for key, feature in image_features.items()}
@@ -838,13 +843,9 @@ def _configure_rtc(config, args) -> None:
         return
 
     if not 0 <= args.rtc_inference_delay <= config.chunk_size:
-        raise ValueError(
-            f"rtc_inference_delay must be between 0 and {config.chunk_size}"
-        )
+        raise ValueError(f"rtc_inference_delay must be between 0 and {config.chunk_size}")
     if not 1 <= args.rtc_execution_horizon <= config.chunk_size:
-        raise ValueError(
-            f"rtc_execution_horizon must be between 1 and {config.chunk_size}"
-        )
+        raise ValueError(f"rtc_execution_horizon must be between 1 and {config.chunk_size}")
     config.rtc_config = RTCConfig(
         enabled=True,
         execution_horizon=args.rtc_execution_horizon,
@@ -879,9 +880,7 @@ def _warmup_compiled_policy(policy_server: PolicyServer, *, two_views: bool) -> 
         started = time.monotonic()
         policy_server.predict_action(examples=example)
         elapsed = time.monotonic() - started
-        logging.info(
-            "Warmup inference done in %.2fs; subsequent requests reuse the compiled graph", elapsed
-        )
+        logging.info("Warmup inference done in %.2fs; subsequent requests reuse the compiled graph", elapsed)
     finally:
         policy_server._debug = was_debug  # noqa: SLF001
         # Drop the synthetic prompt/chunk/RTC state the warmup call left behind.
@@ -889,6 +888,7 @@ def _warmup_compiled_policy(policy_server: PolicyServer, *, two_views: bool) -> 
 
 
 def main(args) -> None:
+    """Load the checkpoint named by the CLI arguments and serve it until stopped."""
     two_views = args.two_views
     right_arm_7d = args.right_arm_7d
 
@@ -945,7 +945,8 @@ def main(args) -> None:
 
     server = WebsocketPolicyServer(
         policy=policy_server,
-        host="0.0.0.0",
+        # Robots connect over the network, so the server listens on every interface.
+        host="0.0.0.0",  # nosec B104
         port=args.port,
         idle_timeout=args.idle_timeout,
         metadata={
@@ -976,6 +977,7 @@ def main(args) -> None:
 
 
 def build_argparser():
+    """Build the command-line parser for the server."""
     p = argparse.ArgumentParser(description="Serve the fixed AIDRC pi0.5 deployment checkpoint.")
     p.add_argument(
         "--ckpt_path",

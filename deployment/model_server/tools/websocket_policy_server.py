@@ -1,17 +1,20 @@
 # Copyright 2025 starVLA community. All rights reserved.
-# Licensed under the MIT License, Version 1.0 (the "License"); 
+# Licensed under the MIT License, Version 1.0 (the "License");
 # Implemented by [Jinhui YE / HKUST University] in [2025].
+
+"""WebSocket server that exposes a policy to robot clients using msgpack frames."""
 
 import asyncio
 import logging
-import traceback
 import time
+import traceback
 
 import websockets.asyncio.server
 import websockets.frames
 
 # from openpi_client import base_policy as _base_policy
 from . import msgpack_numpy
+
 
 class WebsocketPolicyServer:
     """Serves a policy using the websocket protocol. See websocket_client_policy.py for a client implementation.
@@ -22,12 +25,21 @@ class WebsocketPolicyServer:
     def __init__(
         self,
         policy,
-        host: str = "0.0.0.0",
+        # Robots connect over the network, so the default listens on every interface.
+        host: str = "0.0.0.0",  # nosec B104
         port: int = 10093,
         idle_timeout: int = -1,  # 新增参数，单位秒，-1表示永不关闭
         metadata: dict | None = None,
-        
     ) -> None:
+        """Create the server; nothing listens until `serve_forever` is called.
+
+        Args:
+            policy: Object with `predict_action(**payload)` and, optionally, `reset()`.
+            host: Interface to listen on.
+            port: TCP port to listen on.
+            idle_timeout: Seconds without a message before the server shuts down; -1 never shuts down.
+            metadata: Dict sent to every client right after it connects.
+        """
         self._policy = policy  #
         self._host = host
         self._port = port
@@ -37,9 +49,11 @@ class WebsocketPolicyServer:
         logging.getLogger("websockets.server").setLevel(logging.INFO)
 
     def serve_forever(self) -> None:
+        """Run the server in a new event loop until it stops."""
         asyncio.run(self.run())
 
     async def run(self):
+        """Serve connections until the idle timeout closes the server, or forever without one."""
         async with websockets.asyncio.server.serve(
             self._handler,
             self._host,
@@ -53,7 +67,7 @@ class WebsocketPolicyServer:
                 await server.serve_forever()
 
     async def _idle_watchdog(self, server):
-        """监控空闲时间，超时则关闭服务器"""
+        """Close the server once no message has arrived for `idle_timeout` seconds."""
         while True:
             await asyncio.sleep(5)
             if time.time() - self._last_active > self._idle_timeout:
@@ -86,17 +100,28 @@ class WebsocketPolicyServer:
                 raise
 
     # route logic: recognize request from client
-    def _route_message(self, msg: dict) -> dict:
-        """
+    def _route_message(self, msg: object) -> dict:
+        """Route one client message to the policy and return the reply.
+
         Route rules (fault-tolerant):
         - Supports messages of form:
             {"type": "ping|init|infer|reset", "request_id": "...", "payload": {...}}
           or a flat dict (will be treated as payload).
         - Does NOT raise inside this function: all exceptions are caught and encoded in response.
         """
+        # Basic payload sanity: checked before any msg.get(), which a non-dict message would raise on.
+        # A message without a type is an infer request, hence "inference_result".
+        if not isinstance(msg, dict):
+            return {
+                "status": "error",
+                "ok": False,
+                "type": "inference_result",
+                "request_id": "default",
+                "error": {"message": "Payload must be a dict", "payload_type": str(type(msg))},
+            }
+
         req_id = msg.get("request_id", "default")
-        mtype = msg.get("type", "infer")          # default = infer
-        msg       # when no explicit payload, treat top-level as payload
+        mtype = msg.get("type", "infer")  # default = infer
 
         # ping
         if mtype == "ping":
@@ -104,29 +129,19 @@ class WebsocketPolicyServer:
 
         # infer --> framework.predict_action
         elif mtype == "infer" or mtype == "predict_action":
-            # Basic payload sanity
-            if not isinstance(msg, dict):
-                return {
-                    "status": "error",
-                    "ok": False,
-                    "type": "inference_result",
-                    "request_id": req_id,
-                    "error": {"message": "Payload must be a dict", "payload_type": str(type(payload))}
-                }
             try:
-
                 # Strip routing fields — only pass observation payload to the model
                 payload = {k: v for k, v in msg.items() if k not in ("type", "request_id")}
                 # If the client sends {"examples": [...]}, pass through as-is.
                 # Otherwise (robot client sends observations as a flat dict), wrap it.
                 if "examples" not in payload:
                     payload = {"examples": [payload]}
-                ouput_dict = self._policy.predict_action(**payload)
+                output_dict = self._policy.predict_action(**payload)
 
             except Exception as e:
                 logging.exception("Policy inference error (request_id=%s)", req_id)
                 logging.exception(e)
-                
+
                 return {
                     "status": "error",
                     "ok": False,
@@ -142,7 +157,7 @@ class WebsocketPolicyServer:
                 "ok": True,
                 "type": "inference_result",
                 "request_id": req_id,
-                **ouput_dict,  # spreads e.g. "actions": array at the top level
+                **output_dict,  # spreads e.g. "actions": array at the top level
             }
 
         # reset --> clear smoothing state between episodes
@@ -161,7 +176,7 @@ class WebsocketPolicyServer:
                     "error": {"message": str(e)},
                 }
 
-        # unknow request type
+        # unknown request type
         else:
             return {
                 "status": "error",

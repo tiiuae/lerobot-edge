@@ -35,6 +35,7 @@ move_dataset_repo_ids = [
 ### Example Dataset Configuration
 
 If your datasets are located at:
+
 ```
 ~/.cache/huggingface/lerobot/my-user/
 ├── my-dataset-1/
@@ -43,6 +44,7 @@ If your datasets are located at:
 ```
 
 Update the list to:
+
 ```python
 move_dataset_repo_ids = [
     "my-dataset-1",
@@ -74,13 +76,13 @@ SFTP_REMOTE_PATH=/datasets/
 
 ### .env Configuration Details
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `SFTP_HOSTNAME` | Yes | — | The hostname or IP address of your SFTP server |
-| `SFTP_PORT` | No | 22 | The SFTP server port (standard SFTP port is 22) |
-| `SFTP_USERNAME` | Yes | — | Your SFTP username |
-| `SFTP_PASSWORD` | Yes | — | Your SFTP password |
-| `SFTP_REMOTE_PATH` | Yes* | — | Remote directory path on SFTP server (e.g., `/datasets/` or `/remote/datasets/`). Required only if running the upload stage. Must be an existing directory on the server. |
+| Variable           | Required | Default | Description                                                                                                                                                               |
+| ------------------ | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SFTP_HOSTNAME`    | Yes      | —       | The hostname or IP address of your SFTP server                                                                                                                            |
+| `SFTP_PORT`        | No       | 22      | The SFTP server port (standard SFTP port is 22)                                                                                                                           |
+| `SFTP_USERNAME`    | Yes      | —       | Your SFTP username                                                                                                                                                        |
+| `SFTP_PASSWORD`    | Yes      | —       | Your SFTP password                                                                                                                                                        |
+| `SFTP_REMOTE_PATH` | Yes\*    | —       | Remote directory path on SFTP server (e.g., `/datasets/` or `/remote/datasets/`). Required only if running the upload stage. Must be an existing directory on the server. |
 
 **Important:** The `SFTP_REMOTE_PATH` must end with a trailing slash (e.g., `/datasets/` not `/datasets`). The script will automatically add it if missing.
 
@@ -93,6 +95,7 @@ SFTP_REMOTE_PATH=/datasets/
 ```
 
 For production environments, consider using:
+
 - SSH key authentication instead of password authentication
 - Dedicated SFTP service accounts with restricted permissions
 - Encrypted password storage or credential management systems
@@ -108,6 +111,7 @@ python dataset-wizard.py
 ```
 
 This will:
+
 1. Convert datasets from v2.1 to v3.0 format (if needed)
 2. Merge all configured datasets
 3. Compress and upload the result to the SFTP server
@@ -127,6 +131,7 @@ python dataset-wizard.py --start-from upload
 ```
 
 **Options:**
+
 - `conversion` - Start from dataset format conversion (default)
 - `merge` - Skip conversion, start from dataset merging
 - `upload` - Skip all earlier stages, start from compression and upload
@@ -141,6 +146,7 @@ python dataset-wizard.py --stop-at merge
 ```
 
 **Options:**
+
 - `conversion` - Run only the conversion stage
 - `merge` - Stop after merging (skip upload)
 - `upload` - Run all stages through upload (default)
@@ -184,6 +190,7 @@ python dataset-wizard.py \
 ```
 
 This will:
+
 - Skip the conversion stage
 - Merge datasets from `~/.cache/huggingface/lerobot/my-user/`
 - Output merged dataset to `.../my-aloha-merged-dataset/`
@@ -196,16 +203,19 @@ This will:
 Converts dataset format from v2.1 to v3.0 using the `convert_dataset` function.
 
 **What happens:**
+
 - Scans each dataset in the base path
 - Converts format if necessary
 - Stores converted dataset in the same location
 
 **Triggered by:**
+
 ```bash
 python dataset-wizard.py --start-from conversion
 ```
 
 **Skip if:**
+
 - Your datasets are already in v3.0 format
 - You've already run the conversion stage
 
@@ -214,17 +224,20 @@ python dataset-wizard.py --start-from conversion
 Loads individual datasets and merges them into a single unified dataset.
 
 **What happens:**
+
 - Loads each dataset from the base path
 - Consolidates video, data, and metadata
 - Creates a new merged dataset at the output directory
 - Displays episode and frame statistics
 
 **Triggered by:**
+
 ```bash
 python dataset-wizard.py --start-from merge
 ```
 
 **Output:**
+
 - Merged dataset directory at `{base-path}/{merged-name}/`
 - Statistics showing total episodes and frames
 
@@ -234,18 +247,20 @@ Removes unwanted sub-elements from array features in the merged dataset. This ru
 
 **What gets removed** (configured via `FEATURES_TO_SLICE` at the top of `dataset-wizard.py`):
 
-| Feature | Removed sub-features | Shape change |
-|---------|----------------------|--------------|
-| `action` | `linear_vel`, `angular_vel` | `(16,)` → `(14,)` |
+| Feature             | Removed sub-features                                          | Shape change      |
+| ------------------- | ------------------------------------------------------------- | ----------------- |
+| `action`            | `linear_vel`, `angular_vel`                                   | `(16,)` → `(14,)` |
 | `observation.state` | `odom_x`, `odom_y`, `odom_theta`, `linear_vel`, `angular_vel` | `(19,)` → `(14,)` |
 
 **What happens:**
+
 - Reads each parquet file in the merged dataset
 - Replaces each feature with a sliced version (dropping the specified sub-elements)
 - Saves the result as a new dataset named `{merged-name}-sliced`
 - The original merged dataset is preserved untouched
 
 **Output:**
+
 - Sliced dataset directory at `{base-path}/{merged-name}-sliced/`
 
 **To change which sub-features are removed**, edit the `FEATURES_TO_SLICE` dictionary near the top of `dataset-wizard.py`:
@@ -262,12 +277,14 @@ FEATURES_TO_SLICE = {
 Compresses the merged dataset and uploads it to the SFTP server.
 
 **What happens:**
+
 - Creates a ZIP file of the merged dataset
 - Connects to the SFTP server using credentials from `.env`
 - Uploads the ZIP file with progress tracking
 - Verifies successful upload
 
 **Triggered by:**
+
 ```bash
 python dataset-wizard.py --start-from upload
 ```
@@ -275,6 +292,7 @@ python dataset-wizard.py --start-from upload
 **Note:** When starting from `upload`, the script uses `{merged-name}` as the source directory.
 
 **Requirements:**
+
 - Valid `.env` file with SFTP credentials
 - `SFTP_REMOTE_PATH` directory must exist on the server
 - Sufficient disk space on SFTP server
@@ -283,63 +301,82 @@ python dataset-wizard.py --start-from upload
 ## Output Files
 
 ### During Processing
+
 - **Converted datasets:** Stored in-place at `{base-path}/{dataset-id}/`
 - **Merged dataset:** Created at `{base-path}/{merged-name}/`
 - **Compressed file:** Created as `{base-path}/{merged-name}.zip`
 
 ### After Upload
+
 - **Remote file:** Uploaded to `{SFTP_REMOTE_PATH}{merged-name}.zip`
 
 ## Troubleshooting
 
 ### `.env` file not found
+
 ```
 Error: dotenv could not find .env file
 ```
+
 **Solution:** Create a `.env` file in the project root directory with the required variables.
 
 ### SFTP connection refused
+
 ```
 Error: Connection refused on SFTP_HOSTNAME:SFTP_PORT
 ```
+
 **Checklist:**
+
 - Verify `SFTP_HOSTNAME` and `SFTP_PORT` are correct
 - Check network connectivity to the SFTP server
 - Ensure the SFTP server is running
 - Check firewall rules allowing outbound connections
 
 ### Authentication failed
+
 ```
 Error: Authentication failed with username/password
 ```
+
 **Solution:**
+
 - Verify `SFTP_USERNAME` and `SFTP_PASSWORD` in the `.env` file
 - Check for special characters that may need escaping
 - Ensure the SFTP account has permission to connect
 
 ### Remote path error
+
 ```
 Error: SFTP_REMOTE_PATH environment variable is not set
 ```
+
 **Solution:**
+
 - Add `SFTP_REMOTE_PATH=/path/to/remote/dir/` to the `.env` file
 - Ensure the path ends with a trailing slash
 - Verify the directory exists on the SFTP server
 
 ### Insufficient disk space
+
 ```
 Error: No space left on device
 ```
+
 **Solution:**
+
 - Check available disk space on local and remote systems
 - Consider running each stage separately to clean up intermediate files
 - Delete the ZIP file after successful upload if needed
 
 ### Dataset conversion errors
+
 ```
 Error: Could not convert dataset from v2.1 to v3.0
 ```
+
 **Solution:**
+
 - Verify datasets are in the correct format
 - Check that the dataset directories are accessible
 - Review conversion logs for specific errors
@@ -447,6 +484,7 @@ base-path/
 ## Support
 
 For issues or questions:
+
 1. Check the troubleshooting section above
 2. Review the [Contributing Guide](CONTRIBUTING.md)
 3. Open an issue on the [GitHub repository](https://github.com/huggingface/lerobot)
