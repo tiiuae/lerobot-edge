@@ -21,6 +21,8 @@ and code ownership, without a big-bang cleanup of existing code.
     so the import it writes into `CLAUDE.md` lands in `AGENTS.md` as a self-import.
   - `pyproject.toml`: `[tool.ruff.lint]` `select` / `ignore` renamed to `extend-select` / `extend-ignore`, so
     the repository's rules add to the team base instead of replacing it.
+  - `pyproject.toml`: `[tool.coverage.run] relative_files = true`, which the CI's coverage comment needs: it reads
+    the coverage data inside a container, where the runner's absolute paths don't exist.
   - `.github/workflows/ci.yml` and `graph-on-merge.yml`: the installer's stubs replaced with copies of the team
     workflows (dev-standard v1.3.1), because a public repository cannot call reusable workflows from the private
     tiiuae/dev-standard. Inputs filled in: lint, ratchet and tests on `deployment/` and `tests/deployment/` (the

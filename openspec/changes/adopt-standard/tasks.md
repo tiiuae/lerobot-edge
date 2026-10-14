@@ -10,6 +10,7 @@
 - [x] 1.6 Replace the `ci.yml` and `graph-on-merge.yml` stubs with copies of the dev-standard v1.3.1 workflows (inputs filled in, actions pinned to SHAs, per-job permissions) and verify `actionlint` and `zizmor --offline` report nothing, and that the copied jobs differ from the source only in the filled-in inputs, check names and those zizmor fixes
 - [x] 1.7 Exclude the vendored `.dev-standard/` from the bandit and mypy hooks and verify `pre-commit run bandit --files .dev-standard/ratchet.py` and `pre-commit run mypy --files .dev-standard/ratchet.py` skip it
 - [x] 1.8 Write `design.md` (flowchart and Before/After diagrams) and `explainer.html` from the team templates and verify `openspec validate adopt-standard` passes and the explainer renders without an error banner
+- [x] 1.9 Set `relative_files = true` under `[tool.coverage.run]` and verify coverage data recorded in one checkout reads from another (it failed with `NoSource` before, as the coverage-comment step did in CI)
 
 ## 2. Decisions to confirm
 
@@ -32,3 +33,4 @@
 - [x] 4.3 Merge #2 (`clean-up`, brings `deployment/` to `main`) before this PR, and verify this PR's `ci / python` ratchet and patch-coverage steps pass against the updated `main` (locally: ratchet 7 → 7, 88 → 88; no covered lines in the diff)
 - [ ] 4.4 Archive this change after the PR merges (`npx -y @fission-ai/openspec@1 archive adopt-standard --yes`) and verify `openspec/changes/adopt-standard/` has moved under `openspec/changes/archive/`
 - [ ] 4.5 Once tiiuae/dev-standard is public and has a `v1` ref, switch `ci.yml` and `graph-on-merge.yml` back to the installer's stubs (`uses: tiiuae/dev-standard/.github/workflows/…@v1`) and verify `ci / python` and `ci / change-present` run from the stub
+- [ ] 4.6 Report to tiiuae/dev-standard that its `ci.yml` coverage comment fails with `NoSource` unless the repository sets coverage `relative_files = true`, and verify an issue or PR is filed

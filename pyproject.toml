@@ -532,6 +532,11 @@ markers = [
     "multigpu_heavy: 8-GPU sweeps and soak tests; never run in CI",
 ]
 
+[tool.coverage.run]
+# ci.yml's coverage comment (python-coverage-comment-action) reads the coverage data inside a container, where the
+# runner's absolute paths don't exist; relative paths resolve there.
+relative_files = true
+
 [tool.mypy]
 python_version = "3.12"
 ignore_missing_imports = true
