@@ -24,7 +24,7 @@ and code ownership, without a big-bang cleanup of existing code.
   - `.github/workflows/ci.yml`: `src_paths` / `cov_source` set to `deployment` and `test_paths` to
     `tests/deployment` (the team-owned code in this fork); `install_cmd` installs the `dev` and `test` extras
     plus the server's `websockets` and `msgpack`; `python_version` set to `3.12` (`requires-python >= 3.12`).
-  - `CODEOWNERS`: `@salehaalbreiki` owns every path; the `<docs-bot>` entries are dropped.
+  - `CODEOWNERS`: `@salehaalbreiki` and `@ibrahimkhadraoui` own every path; the `<docs-bot>` entries are dropped.
   - `.github/workflows/ci.yml`: no `secrets: inherit` (zizmor `secrets-inherit`): it would pass every repository
     secret to a workflow in another repository at the movable `@v1` tag. `GITHUB_TOKEN` is always available to the
     called workflow; its only other secret, `DOCS_APPROVER_TOKEN`, is optional.

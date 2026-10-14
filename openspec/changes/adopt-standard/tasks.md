@@ -6,7 +6,7 @@
 - [x] 1.2 Rename the repository's ruff `select` / `ignore` to `extend-select` / `extend-ignore` and verify `ruff check --show-settings deployment/model_server/server_policy.py` shows `linter.mccabe.max_complexity = 10` and `linter.pylint.max_statements = 50`
 - [x] 1.3 Remove the `@AGENTS.md` self-import written through the `CLAUDE.md` symlink and verify `AGENTS.md` starts with its original first line
 - [x] 1.4 Set the `ci.yml` inputs and verify the `install_cmd` and the test step pass in a scratch environment (`uv sync --locked --extra dev --extra test`, then `uv run pytest tests/deployment --cov=deployment`: 45 passed)
-- [x] 1.5 Fill `CODEOWNERS` with `@salehaalbreiki` and verify no `<team>` or `<docs-bot>` placeholder remains
+- [x] 1.5 Fill `CODEOWNERS` with `@salehaalbreiki` and `@ibrahimkhadraoui` and verify no `<team>` or `<docs-bot>` placeholder remains
 - [x] 1.6 Drop `secrets: inherit` from `ci.yml` and verify `zizmor --offline .github/workflows/ci.yml .github/workflows/graph-on-merge.yml` reports no findings
 - [x] 1.7 Exclude the vendored `.dev-standard/` from the bandit and mypy hooks and verify `pre-commit run bandit --files .dev-standard/ratchet.py` and `pre-commit run mypy --files .dev-standard/ratchet.py` skip it
 
