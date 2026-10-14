@@ -25,6 +25,12 @@ and code ownership, without a big-bang cleanup of existing code.
     `tests/deployment` (the team-owned code in this fork); `install_cmd` installs the `dev` and `test` extras
     plus the server's `websockets` and `msgpack`; `python_version` set to `3.12` (`requires-python >= 3.12`).
   - `CODEOWNERS`: `@salehaalbreiki` owns every path; the `<docs-bot>` entries are dropped.
+  - `.github/workflows/ci.yml`: no `secrets: inherit` (zizmor `secrets-inherit`): it would pass every repository
+    secret to a workflow in another repository at the movable `@v1` tag. `GITHUB_TOKEN` is always available to the
+    called workflow; its only other secret, `DOCS_APPROVER_TOKEN`, is optional.
+  - `.pre-commit-config.yaml`: the bandit and mypy hooks exclude `.dev-standard/`, which is vendored and overwritten
+    by `install.sh` (the team ruff base already excludes it). They flagged the vendored `ratchet.py`.
+- Also in this PR (separate commit): the deployment server's flag rename and RTC protocol v2 docs and tests.
 
 ## Capabilities
 
@@ -44,3 +50,7 @@ None.
   `pre-commit run --all-files` on every PR, so that job fails until this is resolved (see tasks).
 - New CI (`ci.yml`) lints, type-checks, ratchets and tests only `deployment/` and `tests/deployment/`; ruff and
   mypy are non-blocking until that code is clean.
+- Without `secrets: inherit`, docs-only PRs are not auto-approved even if `DOCS_APPROVER_TOKEN` is set.
+- The vendored ratchet passes this PR only because of a dev-standard bug (it lints the whole repository on the base
+  when the owned path does not exist there); the fix is tiiuae/dev-standard#6 and reaches this repository with the
+  next dev-standard upgrade.

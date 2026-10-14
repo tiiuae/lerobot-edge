@@ -7,6 +7,8 @@
 - [x] 1.3 Remove the `@AGENTS.md` self-import written through the `CLAUDE.md` symlink and verify `AGENTS.md` starts with its original first line
 - [x] 1.4 Set the `ci.yml` inputs and verify the `install_cmd` and the test step pass in a scratch environment (`uv sync --locked --extra dev --extra test`, then `uv run pytest tests/deployment --cov=deployment`: 45 passed)
 - [x] 1.5 Fill `CODEOWNERS` with `@salehaalbreiki` and verify no `<team>` or `<docs-bot>` placeholder remains
+- [x] 1.6 Drop `secrets: inherit` from `ci.yml` and verify `zizmor --offline .github/workflows/ci.yml .github/workflows/graph-on-merge.yml` reports no findings
+- [x] 1.7 Exclude the vendored `.dev-standard/` from the bandit and mypy hooks and verify `pre-commit run bandit --files .dev-standard/ratchet.py` and `pre-commit run mypy --files .dev-standard/ratchet.py` skip it
 
 ## 2. Decisions to confirm
 
@@ -20,11 +22,11 @@
 
 - [ ] 3.1 Set branch protection on `main` (PR required, checks `ci / python` and `ci / change-present`, 1 approval, review from Code Owners, dismiss stale approvals, squash-merge only) and verify it in the repository settings
 - [ ] 3.2 Create the labels `backlog perf debt security test-gap docs feature` and verify with `gh label list`
-- [ ] 3.3 Optionally add the `ANTHROPIC_API_KEY` and `DOCS_APPROVER_TOKEN` secrets and verify in the repository settings
+- [ ] 3.3 Optionally add the `ANTHROPIC_API_KEY` secret (archify diagrams on merge) and verify in the repository settings; `DOCS_APPROVER_TOKEN` has no effect without `secrets: inherit` (task 1.6)
 
 ## 4. Follow-ups
 
 - [ ] 4.1 Report to tiiuae/dev-standard that `install.sh` writes the `@AGENTS.md` import through a `CLAUDE.md -> AGENTS.md` symlink (it reappears on every re-run or upgrade) and verify an issue is filed
-- [ ] 4.2 Report to tiiuae/dev-standard that `ratchet.py` lints the whole repository on the base side when an owned path does not exist there yet, and verify an issue is filed
-- [ ] 4.3 File a backlog issue for the undefined `payload` (ruff F821) in `deployment/model_server/tools/websocket_policy_server.py:114` and verify it with `gh issue list --label backlog`
+- [x] 4.2 Fix `ratchet.py` linting the whole repository on the base side when an owned path does not exist there, upstream, and verify tiiuae/dev-standard#6 is open with tests
+- [ ] 4.3 Before upgrading to a dev-standard release that contains tiiuae/dev-standard#6, get `deployment/` onto `main` or clean it (7 size and 88 lint violations), and verify the ratchet step passes
 - [ ] 4.4 Archive this change after the PR merges (`npx -y @fission-ai/openspec@1 archive adopt-standard --yes`) and verify `openspec/changes/adopt-standard/` has moved under `openspec/changes/archive/`

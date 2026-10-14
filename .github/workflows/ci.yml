@@ -27,4 +27,6 @@ jobs:
       js: false
       cpp: false
       # docs: true # strict docs-site build on every PR (skill docs-site; runs `make docs`)
-    secrets: inherit
+    # No `secrets: inherit`: it would hand every repository secret to a workflow in another repo at the
+    # movable @v1 tag (zizmor secrets-inherit). GITHUB_TOKEN is always available to it; the only other secret
+    # it reads, DOCS_APPROVER_TOKEN, is optional (docs-only auto-approve, skipped without it).
