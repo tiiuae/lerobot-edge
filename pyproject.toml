@@ -383,7 +383,6 @@ lerobot = ["envs/*.json", "annotations/steerable_pipeline/prompts/*.txt"]
 where = ["src"]
 
 [tool.ruff]
-extend = ".dev-standard/ruff.toml"
 target-version = "py312"
 line-length = 110
 exclude = ["tests/artifacts/**/*.safetensors", "*_pb2.py", "*_pb2_grpc.py"]
@@ -403,10 +402,10 @@ exclude = ["tests/artifacts/**/*.safetensors", "*_pb2.py", "*_pb2_grpc.py"]
 # T20: flake8-print (discourage print statements in production code)
 # N: pep8-naming
 # TODO: Uncomment rules when ready to use
-extend-select = [
+select = [
     "E", "W", "F", "I", "B", "C4", "T20", "N", "UP", "SIM", "D" #, "A", "S", "RUF"
 ]
-extend-ignore = [
+ignore = [
     "E501", # Line too long
     "T201", # Print statement found
     "T203", # Pprint statement found

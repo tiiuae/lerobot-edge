@@ -22,7 +22,7 @@ flowchart LR
   ci -->|ratchet| base[.dev-standard/]:::new
   ci -->|tests| deploy[deployment/ + tests]
   ci -->|checks| change[openspec/changes/]:::new
-  py[pyproject.toml]:::changed -->|extend| base
+  ci -->|coverage paths| py[pyproject.toml]:::changed
   pr -->|review| owners[CODEOWNERS]:::new
   owners -->|approve| main[main]
   ci -->|green| main
@@ -65,7 +65,7 @@ Caption: what a PR into `main` goes through before and after the adoption; lerob
 **Non-Goals:**
 
 - Cleaning existing lint or type debt in `deployment/` or upstream code.
-- Changing upstream code or lerobot's own workflows (`quality.yml` stays as it is; see Open Questions).
+- Changing upstream code, lerobot's own workflows or lerobot's ruff settings.
 - A docs site, branch protection, labels or secrets (GitHub settings, done by a human; `tasks.md` group 3).
 
 ## Decisions
@@ -80,10 +80,16 @@ Caption: what a PR into `main` goes through before and after the adoption; lerob
 - **Lint, ratchet and test only `deployment/` and `tests/deployment/`, over `src/`.** On a fork, upstream code is not
   ours to clean; upstream's suite keeps running in `fast_tests.yml` / `full_tests.yml`. `dataset-wizard.py` stays out
   for now (task 2.3).
-- **Rename the repository's ruff `select` / `ignore` to `extend-select` / `extend-ignore`, over keeping or deleting
-  them.** Kept, they would replace the team base; deleted, the repository's own additions (`T20`) would be lost.
+- **Keep lerobot's ruff settings and apply the team rules through the ratchet only, over extending the team base in
+  `pyproject.toml`.** With `extend`, pre-commit applies the team rules to every file, so lerobot's Quality check fails
+  on upstream code (10,086 findings). A team-rules config scoped to `deployment/` would also fail Quality, on the 88
+  existing team-rule findings there (7 of them over the size limits). The ratchet in `ci.yml` lints `deployment/`
+  with `.dev-standard/ruff.toml` directly, so new code is still held to the team rules; editors and pre-commit show
+  lerobot's rules.
+- **`mdx` in `.editorconfig`'s 2-space group, over the installer's default.** Prettier reads `.editorconfig`; with
+  4 spaces it re-indents lerobot's `.mdx` docs and fails Quality.
 - **The bandit and mypy hooks skip `.dev-standard/`, over fixing the vendored files.** `install.sh` overwrites them on
-  every run; the team ruff base already excludes the directory.
+  every run.
 - **Two code owners, over one.** An author cannot approve their own PR, so a single owner could never satisfy
   "Require review from Code Owners" on their own changes.
 - **Remove the installer's `@AGENTS.md` line, over keeping it.** It was written through the `CLAUDE.md` symlink and made
@@ -94,8 +100,9 @@ Caption: what a PR into `main` goes through before and after the adoption; lerob
 - [The copied workflows drift from dev-standard's] → the header of each file names the source commit; re-copy on every
   dev-standard upgrade, and switch back to the stubs once dev-standard is public (task 4.5).
 - [Pinned action SHAs go stale] → bump them deliberately on upgrade, like the rest of this repository's workflows.
-- [`quality.yml` runs pre-commit on all files with the team ruff base and fails on upstream code (10,070 findings)] →
-  it is not a required check; how to handle it is open (task 2.1).
+- [Editors and pre-commit don't show the team rules] → the ratchet in `ci.yml` blocks new team-rule violations on
+  every PR.
+- [An installer re-run adds the ruff `extend` back to `pyproject.toml`] → remove it again after every run (task 4.7).
 - [The vendored ratchet lets a PR that adds a new owned path through unchecked] → fixed upstream in
   tiiuae/dev-standard#6; arrives with the next dev-standard upgrade.
 
@@ -104,8 +111,3 @@ Caption: what a PR into `main` goes through before and after the adoption; lerob
 Merge this PR, then a human turns on branch protection for `main` with the checks `ci / python` and
 `ci / change-present` and a code-owner review (task 3.1). Rollback: revert the squash commit; nothing outside the
 repository changes.
-
-## Open Questions
-
-- How `quality.yml` should treat the team ruff base on upstream code (task 2.1). It does not change this design: the
-  team gate is `ci.yml`, which lints only the team-owned paths.

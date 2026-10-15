@@ -15,12 +15,16 @@ and code ownership, without a big-bang cleanup of existing code.
   (config, team schema `dev-standard`), the OpenSpec commands and skills under `.claude/` and `.agents/`, the
   shared skills, and `skills-lock.json`.
 - Edited by `install.sh`: the team block appended to `AGENTS.md`; `extend = ".dev-standard/ruff.toml"` added to
-  `[tool.ruff]` in `pyproject.toml`.
+  `[tool.ruff]` in `pyproject.toml` (removed again by hand, see below).
 - Edited by hand:
   - `AGENTS.md`: removed the `@AGENTS.md` line the installer prepended. `CLAUDE.md` is a symlink to `AGENTS.md`,
     so the import it writes into `CLAUDE.md` lands in `AGENTS.md` as a self-import.
-  - `pyproject.toml`: `[tool.ruff.lint]` `select` / `ignore` renamed to `extend-select` / `extend-ignore`, so
-    the repository's rules add to the team base instead of replacing it.
+  - `pyproject.toml`: the installer's ruff `extend` removed, so lerobot's own ruff settings stay exactly as upstream
+    has them. Extending the team base applied the team rules to all of upstream through pre-commit (lerobot's
+    Quality check: 10,086 findings). The team rules still gate new code: `ci.yml`'s ratchet lints `deployment/` with
+    `.dev-standard/ruff.toml` directly.
+  - `.editorconfig`: `mdx` added to the 2-space group. Prettier reads `.editorconfig`; with 4 spaces it re-indented
+    lerobot's `.mdx` docs, which fails Quality.
   - `pyproject.toml`: `[tool.coverage.run] relative_files = true`, which the CI's coverage comment needs: it reads
     the coverage data inside a container, where the runner's absolute paths don't exist.
   - `.github/workflows/ci.yml` and `graph-on-merge.yml`: the installer's stubs replaced with copies of the team
@@ -46,9 +50,9 @@ None.
 ## Impact
 
 - No runtime code, API or dependency of the package changes.
-- The pre-commit ruff hooks now apply the team base on top of the repository's rules: whole-repo violations go
-  from 42 to 10,070 (ruff 0.14.1, mostly `ANN*` and complexity rules in upstream code). `quality.yml` runs
-  `pre-commit run --all-files` on every PR, so that job fails until this is resolved (see tasks).
+- lerobot's Quality check (pre-commit on all files) behaves as on `main`, which passes since #5: editors and
+  pre-commit keep lerobot's ruff rules, and the team rules apply in CI, through the ratchet, to new code in
+  `deployment/`.
 - New CI (`ci.yml`) lints, type-checks, ratchets and tests only `deployment/` and `tests/deployment/`; ruff and
   mypy are non-blocking until that code is clean.
 - `deployment/` is on `main` (#2), so CI compares like for like: every blocking `ci / python` step passes locally
