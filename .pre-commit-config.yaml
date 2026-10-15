@@ -90,6 +90,8 @@ repos:
     - id: bandit
       args: ["-c", "pyproject.toml"]
       additional_dependencies: ["bandit[toml]"]
+      # .dev-standard/ is vendored from tiiuae/dev-standard and overwritten by its install.sh.
+      exclude: ^\.dev-standard/
 
   # TODO(Steven): Uncomment when ready to use
   ##### Static Analysis & Typing #####
@@ -98,7 +100,8 @@ repos:
     hooks:
       - id: mypy
         args: [--config-file=pyproject.toml]
-        exclude: ^(examples|benchmarks|tests)/
+        # .dev-standard/ is vendored from tiiuae/dev-standard and overwritten by its install.sh.
+        exclude: ^(examples|benchmarks|tests|\.dev-standard)/
 
   ##### Docstring Checks #####
   # - repo: https://github.com/akaihola/darglint2

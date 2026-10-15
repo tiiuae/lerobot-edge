@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "skills": {
+    "docs-site": {
+      "source": "tiiuae/dev-standard",
+      "sourceType": "github",
+      "skillPath": "skills/docs-site/SKILL.md",
+      "computedHash": "0c82788fe6d8369263bd7fed1a6ef334864c2759577b49e13c58a9d181110ef0"
+    },
+    "hardware-dod": {
+      "source": "tiiuae/dev-standard",
+      "sourceType": "github",
+      "skillPath": "skills/hardware-dod/SKILL.md",
+      "computedHash": "a602ac463d258a519505843dbb6581ce61791b127033ff717a2447fb952d684c"
+    },
+    "pr-review": {
+      "source": "tiiuae/dev-standard",
+      "sourceType": "github",
+      "skillPath": "skills/pr-review/SKILL.md",
+      "computedHash": "e2b12526e1520c65efa5fb669cd4a418c16c51908adb5d829dab9da79285ce08"
+    },
+    "ui-design-system": {
+      "source": "tiiuae/dev-standard",
+      "sourceType": "github",
+      "skillPath": "skills/ui-design-system/SKILL.md",
+      "computedHash": "9ed10d6c1dd829f9c8605c9246c3442c4ed07a75ad7621237ddfc4d45dea4c75"
+    }
+  }
+}

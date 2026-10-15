@@ -1,0 +1,627 @@
+<!doctype html>
+<!--
+  Change explainer — template from the team OpenSpec schema (openspec/schemas/dev-standard, source: tiiuae/dev-standard).
+  Agents: copy this file to openspec/changes/<change>/explainer.html and replace the CHANGE object in the first
+  <script>. Change nothing else; the page builds itself from CHANGE. Self-contained: no network, works from disk.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Change explainer</title>
+<style>
+/* ── Tokens: a copy of dev-standard ui/tokens.css (the explainer must work without the vendored ui/). ── */
+:root {
+  --bg: #ffffff; --surface: #edeff1; --raised: #e2e5e8; --border: #d6dadd;
+  --text: #253746; --muted: #75787b;
+  --accent: #6400ff; --accent-dim: #4a00bd; --on-accent: #ffffff;
+  --accent-wash: rgba(100, 0, 255, 0.10); --hover-wash: rgba(37, 55, 70, 0.06);
+  --ok: #00c389; --warn: #f5a623; --error: #e5484d; --on-error: #ffffff;
+  --radius-box: 8px; --radius-ctl: 4px;
+  --font-sans: "Mulish", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+html.dark {
+  --bg: #182531; --surface: #253746; --raised: #324459; --border: #3d5164;
+  --text: #ffffff; --muted: #9ca9b3;
+  --accent: #8b4dff; --accent-dim: #6f2fe0; --on-accent: #ffffff;
+  --accent-wash: rgba(139, 77, 255, 0.16); --hover-wash: rgba(255, 255, 255, 0.07);
+}
+
+/* ── Page ── */
+*, *::before, *::after { box-sizing: border-box; }
+html { color-scheme: light; }
+html.dark { color-scheme: dark; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font-family: var(--font-sans); font-size: 15px; line-height: 1.6; -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3, p { margin: 0; }
+code { font-family: var(--font-mono); font-size: 0.88em; padding: 1px 5px; border-radius: var(--radius-ctl); background: var(--raised); }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+[hidden] { display: none !important; }
+.wrap { max-width: 1000px; margin: 0 auto; padding: 0 20px; }
+.eyebrow { font-family: var(--font-mono); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+
+.hero { position: relative; background: var(--surface); border-bottom: 1px solid var(--border); overflow: hidden; }
+.hero::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent); background-size: 50% 100%;
+  background-repeat: no-repeat; animation: sweep 7s ease-in-out infinite;
+}
+@keyframes sweep { 0% { background-position: -100% 0; } 100% { background-position: 200% 0; } }
+.hero .wrap { padding-top: 40px; padding-bottom: 34px; }
+.hero-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.hero h1 { font-size: 30px; line-height: 1.2; font-weight: 800; letter-spacing: -0.01em; margin: 12px 0 10px; max-width: 26ch; }
+.lede { font-size: 17px; color: var(--muted); max-width: 64ch; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 18px; }
+.chip { font-family: var(--font-mono); font-size: 11px; padding: 4px 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg); color: var(--muted); }
+.chip b { color: var(--text); font-weight: 600; }
+.chip[data-on="true"] { border-color: var(--warn); }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 30px; padding: 0 11px;
+  border-radius: var(--radius-ctl); border: 1px solid var(--border); background: var(--bg); color: var(--muted);
+  font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+.btn:hover:not(:disabled) { color: var(--text); border-color: var(--muted); }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); min-width: 76px; }
+.btn-primary:hover:not(:disabled) { background: var(--accent-dim); border-color: var(--accent-dim); color: var(--on-accent); }
+.btn svg { width: 14px; height: 14px; fill: currentColor; fill-rule: evenodd; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-ctl); overflow: hidden; background: var(--bg); }
+.seg button { border: 0; background: none; height: 28px; padding: 0 12px; font-size: 12px; font-weight: 600; color: var(--muted); cursor: pointer; transition: color 0.12s, background 0.12s; }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button[aria-pressed="true"] { background: var(--accent-wash); color: var(--accent); }
+
+main section { padding: 40px 0; border-bottom: 1px solid var(--border); }
+main section:last-child { border-bottom: 0; }
+.sec-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 16px; }
+.sec-head h2 { font-size: 18px; font-weight: 700; }
+.sec-head .eyebrow { color: var(--accent); }
+.prose p { max-width: 68ch; font-size: 16px; }
+.prose p + p { margin-top: 10px; }
+
+.points { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; counter-reset: pt; }
+.points li { position: relative; padding: 14px 14px 14px 46px; border: 1px solid var(--border); border-radius: var(--radius-box); background: var(--surface); counter-increment: pt; }
+.points li::before {
+  content: counter(pt); position: absolute; left: 14px; top: 14px; width: 22px; height: 22px; border-radius: 999px;
+  display: grid; place-items: center; font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+  background: var(--accent-wash); color: var(--accent);
+}
+
+.stage { border: 1px solid var(--border); border-radius: var(--radius-box); background: var(--surface); overflow: hidden; }
+.stage-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.stage-bar .spacer { flex: 1; }
+.counter { font-family: var(--font-mono); font-size: 11px; color: var(--muted); min-width: 44px; text-align: center; }
+.canvas { background: var(--bg); overflow-x: auto; }
+svg.diagram { display: block; width: 100%; height: auto; min-width: 600px; }
+.caption { padding: 14px 16px 6px; border-top: 1px solid var(--border); min-height: 96px; }
+.caption h3 { font-size: 15px; font-weight: 700; display: flex; gap: 8px; align-items: baseline; }
+.caption h3 .eyebrow { color: var(--accent); }
+.caption p { margin-top: 4px; max-width: 80ch; color: var(--text); }
+.caption[data-swap] { animation: rise 0.35s ease; }
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+.progress { height: 2px; background: var(--border); }
+.progress i { display: block; height: 100%; width: 0; background: var(--accent); }
+.steps { list-style: none; margin: 0; padding: 10px 12px 12px; display: flex; flex-wrap: wrap; gap: 6px; }
+.steps button {
+  display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 10px 0 6px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--muted); font-size: 12px; cursor: pointer;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+.steps button .n { width: 18px; height: 18px; border-radius: 999px; display: grid; place-items: center; font-family: var(--font-mono); font-size: 10px; background: var(--surface); }
+.steps button:hover { color: var(--text); }
+.steps button[aria-current="step"] { border-color: var(--accent); color: var(--accent); background: var(--accent-wash); }
+.steps button[aria-current="step"] .n { background: var(--accent); color: var(--on-accent); }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; padding: 0 16px 14px; font-size: 12px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 18px; height: 12px; border-radius: 3px; border: 2px solid var(--border); background: var(--bg); }
+.legend i[data-kind="new"] { border-color: var(--ok); }
+.legend i[data-kind="changed"] { border-color: var(--accent); }
+.legend i[data-kind="removed"] { border-color: var(--error); border-style: dashed; }
+
+/* Diagram. Nodes and edges carry data-mark (new|changed|removed|same) and data-state (normal|focus|dim|ghost|hidden). */
+.node .nb { transition: opacity 0.45s ease, transform 0.45s cubic-bezier(0.2, 0.8, 0.2, 1); transform-box: fill-box; transform-origin: center; }
+.node .box { fill: var(--surface); stroke: var(--border); stroke-width: 1.5; transition: stroke 0.25s, stroke-width 0.25s; }
+.node .halo { fill: var(--accent-wash); opacity: 0; transition: opacity 0.3s; }
+.node .label { font-family: var(--font-sans); font-size: 13px; font-weight: 700; fill: var(--text); }
+.node .sub { font-family: var(--font-sans); font-size: 11px; fill: var(--muted); }
+.node .tag { display: none; }
+.node .tag rect { stroke: none; }
+.node .tag text { font-family: var(--font-mono); font-size: 9px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; fill: var(--bg); }
+.node[data-mark="new"] .box { stroke: var(--ok); stroke-width: 2; }
+.node[data-mark="changed"] .box { stroke: var(--accent); stroke-width: 2; }
+.node[data-mark="removed"] .box { stroke: var(--error); stroke-width: 2; stroke-dasharray: 5 4; }
+.node[data-mark="new"] .tag, .node[data-mark="changed"] .tag, .node[data-mark="removed"] .tag { display: inline; }
+.node[data-mark="new"] .tag rect { fill: var(--ok); }
+.node[data-mark="changed"] .tag rect { fill: var(--accent); }
+.node[data-mark="changed"] .tag text { fill: var(--on-accent); }
+.node[data-mark="removed"] .tag rect { fill: var(--error); }
+.node[data-mark="removed"] .tag text { fill: var(--on-error); }
+.node[data-state="focus"] .box { stroke: var(--accent); stroke-width: 2.5; }
+.node[data-state="focus"] .halo { opacity: 1; animation: pulse 1.8s ease-in-out infinite; }
+.node[data-state="dim"] .nb, .node[data-state="ghost"] .nb { opacity: 0.38; }
+.node[data-state="hidden"] .nb { opacity: 0; transform: scale(0.88); }
+.node[data-ping] .box { animation: ping 0.5s ease-out; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@keyframes ping { 0% { stroke-width: 6; } 100% { stroke-width: 2.5; } }
+
+.edge { transition: opacity 0.45s ease; }
+.edge .line { fill: none; stroke: var(--muted); stroke-width: 1.5; marker-end: url(#arrow); transition: stroke 0.25s; }
+.edge .elabel { font-family: var(--font-mono); font-size: 10.5px; fill: var(--muted); paint-order: stroke; stroke: var(--bg); stroke-width: 5px; stroke-linejoin: round; }
+.edge[data-mark="new"] .line { stroke: var(--ok); marker-end: url(#arrow-new); }
+.edge[data-mark="removed"] .line { stroke: var(--error); stroke-dasharray: 5 4; marker-end: url(#arrow-removed); }
+.edge[data-state="flow"] .line { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 6 5; animation: dash 0.8s linear infinite; marker-end: url(#arrow-on); }
+.edge[data-state="flow"] .elabel { fill: var(--accent); font-weight: 600; }
+.edge[data-state="dim"], .edge[data-state="ghost"] { opacity: 0.3; }
+.edge[data-state="hidden"] { opacity: 0; }
+@keyframes dash { to { stroke-dashoffset: -11; } }
+#arrow path { fill: var(--muted); }
+#arrow-on path { fill: var(--accent); }
+#arrow-new path { fill: var(--ok); }
+#arrow-removed path { fill: var(--error); }
+.packet { fill: var(--accent); stroke: var(--bg); stroke-width: 2; }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; }
+.card { border: 1px solid var(--border); border-radius: var(--radius-box); background: var(--surface); padding: 14px 16px; }
+.card .chose { font-weight: 700; }
+.card .over { margin-top: 2px; font-size: 13px; color: var(--muted); }
+.card .over s { text-decoration-color: var(--error); }
+.card .because { margin-top: 8px; font-size: 14px; }
+.risks { display: grid; gap: 8px; }
+.risk { display: grid; grid-template-columns: 1fr 28px 1fr; align-items: center; gap: 8px; }
+.risk > div { border: 1px solid var(--border); border-radius: var(--radius-box); padding: 10px 14px; background: var(--surface); font-size: 14px; height: 100%; }
+.risk > div:first-child { border-left: 3px solid var(--warn); }
+.risk > div:last-child { border-left: 3px solid var(--ok); }
+.risk svg { width: 28px; height: 14px; fill: none; stroke: var(--muted); stroke-width: 1.5; }
+.sub-head { margin: 22px 0 10px; }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.tags span { font-size: 13px; padding: 4px 10px; border-radius: 999px; border: 1px dashed var(--border); color: var(--muted); }
+.plan { list-style: none; margin: 0; padding: 0; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(150px, 1fr); gap: 0; overflow-x: auto; }
+.plan li { position: relative; padding: 34px 12px 0 0; }
+.plan li::before { content: ""; position: absolute; top: 11px; left: 0; right: 0; height: 2px; background: var(--border); }
+.plan li::after { content: ""; position: absolute; top: 11px; left: 0; height: 2px; width: 0; background: var(--accent); transition: width 0.6s ease; transition-delay: calc(var(--i) * 0.25s); }
+.plan[data-in] li::after { width: 100%; }
+.plan .dot { position: absolute; top: 0; left: 0; width: 24px; height: 24px; border-radius: 999px; display: grid; place-items: center; z-index: 1; font-family: var(--font-mono); font-size: 11px; font-weight: 600; background: var(--bg); border: 2px solid var(--accent); color: var(--accent); }
+.plan .g { font-weight: 700; font-size: 14px; line-height: 1.35; }
+.plan .c { font-family: var(--font-mono); font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+.banner { background: var(--error); color: var(--on-error); padding: 12px 20px; font-size: 13px; }
+.banner ul { margin: 6px 0 0; padding-left: 18px; font-family: var(--font-mono); font-size: 12px; }
+footer { border-top: 1px solid var(--border); background: var(--surface); padding: 18px 0 26px; font-size: 13px; color: var(--muted); }
+footer a { color: var(--accent); }
+
+html.js .reveal { opacity: 0; transform: translateY(14px); transition: opacity 0.6s ease, transform 0.6s ease; }
+html.js .reveal[data-in] { opacity: 1; transform: none; }
+
+@media (max-width: 640px) {
+  .hero h1 { font-size: 24px; }
+  .risk { grid-template-columns: 1fr; }
+  .risk svg { transform: rotate(90deg); justify-self: center; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+  html.js .reveal { opacity: 1; transform: none; }
+}
+@media print {
+  html.js .reveal { opacity: 1; transform: none; }
+  .stage-bar, .steps { display: none; }
+}
+</style>
+</head>
+<body>
+<noscript><p class="wrap">This explainer needs JavaScript. The same content is in proposal.md, design.md and tasks.md next to this file.</p></noscript>
+<div id="app"></div>
+
+<script>
+/* ════════ CHANGE — replace every value below with this change's content (the values here are an example). ════════ */
+const CHANGE = {
+  slug: "adopt-standard",
+  title: "Adopt the team standard in lerobot-edge",
+  summary: "Pull requests to lerobot-edge now go through the team's checks and a code-owner review, on top of lerobot's own CI, without a big cleanup of existing code.",
+  ticket: "",
+  hardware: false,
+
+  problem: [
+    "lerobot-edge is our fork of huggingface/lerobot. Our own code in it, the pi0.5 deployment server in `deployment/`, had no shared workflow, no team lint rules and no team check before merging.",
+    "The team standard (tiiuae/dev-standard) provides all of that, but its CI is a shared workflow in a private repository, and GitHub does not let a public repository like this one use it.",
+  ],
+  idea: [
+    "Install the standard: team configs, change folders, skills and code owners.",
+    "Copy the team CI workflow into the repository so it can run here.",
+    "Check only our own code: `deployment/` and its tests.",
+    "Freeze existing lint debt with a ratchet; new code must be clean.",
+    "Two code owners review every PR.",
+  ],
+
+  diagram: {
+    nodes: [
+      { id: "pr",     label: "pull request",        sub: "a team change",           col: 0, row: 1, kind: "same" },
+      { id: "lci",    label: "lerobot CI",          sub: "quality, fast tests",     col: 1, row: 0, kind: "same" },
+      { id: "ci",     label: "ci.yml (copied)",     sub: "team CI, runs here",      col: 1, row: 1, kind: "new" },
+      { id: "owners", label: "CODEOWNERS",          sub: "Saleha and Ibrahim",      col: 1, row: 2, kind: "new" },
+      { id: "base",   label: ".dev-standard/",      sub: "team ruff base, ratchet", col: 2, row: 0, kind: "new" },
+      { id: "deploy", label: "deployment/ + tests", sub: "team-owned code",         col: 3, row: 2, kind: "same" },
+      { id: "change", label: "openspec/changes/",   sub: "proposal, design, tasks", col: 2, row: 3, kind: "new" },
+      { id: "py",     label: "pyproject.toml",      sub: "coverage paths for CI",   col: 3, row: 0, kind: "changed" },
+      { id: "main",   label: "main",                sub: "merge after review",      col: 4, row: 1, kind: "same" },
+    ],
+    edges: [
+      { from: "pr",     to: "lci",    label: "runs",           kind: "same" },
+      { from: "pr",     to: "ci",     label: "runs",           kind: "new" },
+      { from: "ci",     to: "base",   label: "ratchet",        kind: "new" },
+      { from: "ci",     to: "deploy", label: "tests",          kind: "new" },
+      { from: "ci",     to: "change", label: "checks",         kind: "new" },
+      { from: "ci",     to: "py",     label: "coverage paths", kind: "new" },
+      { from: "pr",     to: "owners", label: "review",         kind: "new" },
+      { from: "owners", to: "main",   label: "approve",        kind: "new" },
+      { from: "ci",     to: "main",   label: "green",          kind: "new" },
+    ],
+  },
+
+  steps: [
+    { view: "before", title: "Today: lerobot's CI only",
+      text: "A pull request runs lerobot's own checks. Nothing team-specific checks our code before it reaches `main`.",
+      focus: ["pr", "lci", "main"], flow: ["pr>lci"] },
+    { title: "The team CI runs here",
+      text: "`ci.yml` is a copy of the team workflow, because a public repository cannot use the private original. The ratchet compares lint with `main` using the team rules.",
+      focus: ["ci", "base"], flow: ["pr>ci", "ci>base"] },
+    { title: "Only our own code",
+      text: "Tests and patch coverage cover `deployment/` and its tests. Upstream lerobot code is left to lerobot's CI.",
+      focus: ["ci", "deploy"], flow: ["pr>ci", "ci>deploy"] },
+    { title: "A change folder for every code PR",
+      text: "A code change needs a folder in `openspec/changes/` with its proposal, design and tasks, or the check fails.",
+      focus: ["ci", "change"], flow: ["pr>ci", "ci>change"] },
+    { title: "Team rules in CI, lerobot's rules locally",
+      text: "The ratchet lints `deployment/` with the team ruff base directly. `pyproject.toml` keeps lerobot's own ruff rules and only adds the coverage setting the CI needs.",
+      focus: ["ci", "base", "py"], flow: ["ci>base", "ci>py"] },
+    { title: "Review, then merge",
+      text: "A code owner approves and the checks are green, so the PR can merge into `main`.",
+      focus: ["owners", "main"], flow: ["pr>owners", "owners>main", "ci>main"] },
+  ],
+
+  decisions: [
+    { chose: "Copy the team CI in", over: "the `uses:` stub", because: "A public repository cannot call workflows from the private tiiuae/dev-standard; switch back once it is public." },
+    { chose: "Check only `deployment/` and its tests", over: "all of `src/`", because: "On a fork, upstream code is not ours to clean; lerobot's CI keeps testing it." },
+    { chose: "Team rules through the ratchet", over: "extending the team base in `pyproject.toml`", because: "Extending applied the team rules to all of upstream and failed lerobot's Quality check." },
+    { chose: "Two code owners", over: "one", because: "An author cannot approve their own PR." },
+  ],
+  risks: [
+    { risk: "The copied CI drifts from the team's.", mitigation: "It names its source commit; re-copy on upgrade and switch back to the stub once the team repository is public." },
+    { risk: "An installer re-run adds the ruff `extend` back.", mitigation: "Remove it again after every run; it is a follow-up task." },
+    { risk: "Pinned action versions go stale.", mitigation: "Bump them deliberately on upgrade, like the repository's other workflows." },
+  ],
+  outOfScope: ["Cleaning existing lint or type debt", "Changing upstream code or lerobot's own workflows", "GitHub settings: branch protection, labels, secrets"],
+  plan: [
+    { group: "Adoption", tasks: 12 },
+    { group: "Decisions to confirm", tasks: 4 },
+    { group: "Only a human can do", tasks: 3 },
+    { group: "Follow-ups", tasks: 8 },
+  ],
+};
+</script>
+
+<script>
+/* ════════ Engine — shared by every explainer; do not edit. ════════ */
+(() => {
+  "use strict";
+  const NS = "http://www.w3.org/2000/svg";
+  const KINDS = ["same", "new", "changed", "removed"];
+  const NODE_H = 58, GAP_X = 84, GAP_Y = 46, PAD = 30, MIN_W = 136, SEG_MS = 1100, REST_MS = 600;
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const root = document.documentElement;
+  root.classList.add("js");
+
+  /* ── helpers ── */
+  const h = (tag, attrs = {}, ...kids) => {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    for (const kid of kids.flat()) if (kid != null) el.append(kid);
+    return el;
+  };
+  const s = (tag, attrs = {}, parent) => {
+    const el = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    if (parent) parent.append(el);
+    return el;
+  };
+  const fmt = (text) => String(text ?? "").split("`").map((part, i) => (i % 2 ? h("code", {}, part) : part));
+  const icon = (d) => { const svg = s("svg", { viewBox: "0 0 16 16", "aria-hidden": "true" }); s("path", { d }, svg); return svg; };
+  const ICONS = {
+    prev: "M10.5 3 5.5 8l5 5V3z", next: "M5.5 3l5 5-5 5V3z", play: "M5 3v10l8-5-8-5z", pause: "M4 3h3v10H4zM9 3h3v10H9z",
+    theme: "M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM8 3a5 5 0 0 1 0 10z",
+  };
+
+  /* ── theme: saved choice, else the OS preference ── */
+  const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+                  set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } } };
+  const saved = store.get("explainer-theme");
+  if (saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches) root.classList.add("dark");
+
+  /* ── validate CHANGE so a typo shows up on the page, not as a silent gap ── */
+  const C = CHANGE, D = C.diagram || { nodes: [], edges: [] }, STEPS = C.steps || [];
+  const errors = [];
+  const nodeIds = new Set();
+  D.nodes.forEach((n, i) => {
+    if (!n.id) errors.push(`diagram.nodes[${i}] has no id`);
+    else if (nodeIds.has(n.id)) errors.push(`duplicate node id "${n.id}"`);
+    nodeIds.add(n.id);
+    if (!Number.isInteger(n.col) || !Number.isInteger(n.row)) errors.push(`node "${n.id}" needs integer col and row`);
+    if (n.kind && !KINDS.includes(n.kind)) errors.push(`node "${n.id}" kind "${n.kind}" is not one of ${KINDS.join(", ")}`);
+  });
+  const cells = new Map();
+  D.nodes.forEach((n) => { const k = `${n.col},${n.row}`; if (cells.has(k)) errors.push(`nodes "${cells.get(k)}" and "${n.id}" share col ${n.col}, row ${n.row}`); cells.set(k, n.id); });
+  const edgeKeys = new Set();
+  D.edges.forEach((e, i) => {
+    for (const end of ["from", "to"]) if (!nodeIds.has(e[end])) errors.push(`diagram.edges[${i}].${end} "${e[end]}" is not a node id`);
+    if (e.kind && !KINDS.includes(e.kind)) errors.push(`edge "${e.from}>${e.to}" kind "${e.kind}" is not one of ${KINDS.join(", ")}`);
+    edgeKeys.add(`${e.from}>${e.to}`);
+  });
+  STEPS.forEach((st, i) => {
+    (st.focus || []).forEach((id) => { if (!nodeIds.has(id)) errors.push(`steps[${i}].focus "${id}" is not a node id`); });
+    (st.flow || []).forEach((k) => { if (!edgeKeys.has(k)) errors.push(`steps[${i}].flow "${k}" is not an edge (write "from>to")`); });
+    if (st.view && !["before", "after"].includes(st.view)) errors.push(`steps[${i}].view must be "before" or "after"`);
+    if (st.view === "before") {
+      const isNew = (id) => D.nodes.some((n) => n.id === id && n.kind === "new");
+      (st.focus || []).filter(isNew).forEach((id) => errors.push(`steps[${i}] is a "before" step but focuses on new node "${id}"`));
+      (st.flow || []).filter((k) => D.edges.some((e) => `${e.from}>${e.to}` === k && (e.kind === "new" || isNew(e.from) || isNew(e.to))))
+        .forEach((k) => errors.push(`steps[${i}] is a "before" step but its flow "${k}" is new`));
+    }
+  });
+
+  /* ── page ── */
+  document.title = `${C.title || C.slug} — explainer`;
+  const app = document.getElementById("app");
+  if (errors.length) {
+    console.error("explainer: CHANGE has errors\n" + errors.join("\n"));
+    app.append(h("div", { class: "banner", role: "alert" }, h("strong", {}, "This explainer's CHANGE object has errors:"), h("ul", {}, errors.map((e) => h("li", {}, e)))));
+  }
+
+  const themeBtn = h("button", { class: "btn", type: "button", "aria-label": "Switch light/dark theme" }, icon(ICONS.theme), "Theme");
+  themeBtn.addEventListener("click", () => { const dark = root.classList.toggle("dark"); store.set("explainer-theme", dark ? "dark" : "light"); });
+  const chips = h("div", { class: "chips" },
+    h("span", { class: "chip" }, "change ", h("b", {}, C.slug || "?")),
+    C.ticket ? h("span", { class: "chip" }, "ticket ", h("b", {}, C.ticket)) : null,
+    h("span", { class: "chip", "data-on": String(!!C.hardware) }, "touches hardware ", h("b", {}, C.hardware ? "yes" : "no")),
+    h("span", { class: "chip" }, "steps ", h("b", {}, String(STEPS.length))));
+  app.append(h("header", { class: "hero" }, h("div", { class: "wrap" },
+    h("div", { class: "hero-top" }, h("span", { class: "eyebrow" }, "Change explainer"), themeBtn),
+    h("h1", {}, fmt(C.title)), h("p", { class: "lede" }, fmt(C.summary)), chips)));
+
+  let secNo = 0;
+  const section = (id, title, ...body) => h("section", { id, class: "reveal", "aria-labelledby": `${id}-h` },
+    h("div", { class: "sec-head" }, h("span", { class: "eyebrow" }, String(++secNo).padStart(2, "0")), h("h2", { id: `${id}-h` }, title)), ...body);
+  const main = h("main", { class: "wrap" });
+  app.append(main);
+
+  if (C.problem?.length) main.append(section("problem", "The problem", h("div", { class: "prose" }, C.problem.map((p) => h("p", {}, fmt(p))))));
+  if (C.idea?.length) main.append(section("idea", "The idea", h("ol", { class: "points" }, C.idea.map((p) => h("li", {}, fmt(p))))));
+
+  /* ── the stage: diagram + steps ── */
+  const svg = s("svg", { class: "diagram", role: "img", "aria-label": "Diagram of the components this change touches" });
+  const caption = h("div", { class: "caption", "aria-live": "polite" });
+  const progress = h("i");
+  const stepList = h("ol", { class: "steps", "aria-label": "Steps" });
+  const btn = (name, label) => h("button", { class: "btn", type: "button", "aria-label": label }, icon(ICONS[name]));
+  const prevBtn = btn("prev", "Previous step"), nextBtn = btn("next", "Next step");
+  const playBtn = h("button", { class: "btn btn-primary", type: "button" });
+  const counter = h("span", { class: "counter tabular" });
+  const viewBefore = h("button", { type: "button", "aria-pressed": "false" }, "Before");
+  const viewAfter = h("button", { type: "button", "aria-pressed": "true" }, "After");
+  const hasBefore = D.nodes.some((n) => n.kind === "new" || n.kind === "removed") || D.edges.some((e) => e.kind === "new" || e.kind === "removed") || STEPS.some((st) => st.view === "before");
+  const legendKinds = KINDS.filter((k) => k !== "same" && (D.nodes.some((n) => n.kind === k) || D.edges.some((e) => e.kind === k)));
+  const stage = h("div", { class: "stage" },
+    h("div", { class: "stage-bar" },
+      hasBefore ? h("div", { class: "seg", role: "group", "aria-label": "Show the system" }, viewBefore, viewAfter) : null,
+      h("span", { class: "spacer" }), prevBtn, counter, nextBtn, playBtn),
+    h("div", { class: "canvas" }, svg),
+    h("div", { class: "progress", "aria-hidden": "true" }, progress),
+    caption, stepList,
+    legendKinds.length ? h("div", { class: "legend" }, legendKinds.map((k) => h("span", {}, h("i", { "data-kind": k }), k === "same" ? "unchanged" : k))) : null);
+  main.append(section("how", "How it works", stage));
+
+  /* layout: columns as wide as their widest node, rows of equal height */
+  const defs = s("defs", {}, svg);
+  for (const id of ["arrow", "arrow-on", "arrow-new", "arrow-removed"]) {
+    const m = s("marker", { id, viewBox: "0 0 10 10", refX: "9", refY: "5", markerWidth: "7", markerHeight: "7", orient: "auto-start-reverse" }, defs);
+    s("path", { d: "M0,0 L10,5 L0,10 z" }, m);
+  }
+  const edgeLayer = s("g", {}, svg), nodeLayer = s("g", {}, svg), packetLayer = s("g", {}, svg);
+  const N = new Map();
+  D.nodes.forEach((n) => {
+    const g = s("g", { class: "node" }, nodeLayer);
+    const width = (cls, text) => { const t = s("text", { class: cls }, g); t.textContent = text; const w = t.getComputedTextLength(); t.remove(); return w; };
+    const w = Math.max(width("label", n.label || n.id), width("sub", n.sub || ""));
+    N.set(n.id, { ...n, kind: n.kind || "same", g, w: Math.max(MIN_W, Math.ceil(w) + 30) });
+  });
+  const cols = Math.max(0, ...D.nodes.map((n) => n.col)) + 1, rows = Math.max(0, ...D.nodes.map((n) => n.row)) + 1;
+  const colW = Array.from({ length: cols }, (_, c) => Math.max(MIN_W, ...[...N.values()].filter((n) => n.col === c).map((n) => n.w)));
+  const colX = colW.map((_, c) => PAD + colW.slice(0, c).reduce((a, b) => a + b, 0) + c * GAP_X);
+  const W = PAD * 2 + colW.reduce((a, b) => a + b, 0) + (cols - 1) * GAP_X, H = PAD * 2 + rows * NODE_H + (rows - 1) * GAP_Y;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.style.maxWidth = `${Math.max(W, 600)}px`;
+  svg.style.margin = "0 auto";
+
+  for (const n of N.values()) {
+    n.x = colX[n.col] + (colW[n.col] - n.w) / 2; n.y = PAD + n.row * (NODE_H + GAP_Y);
+    n.g.setAttribute("transform", `translate(${n.x},${n.y})`);
+    n.g.dataset.id = n.id;
+    const nb = s("g", { class: "nb" }, n.g);
+    s("rect", { class: "halo", x: -7, y: -7, width: n.w + 14, height: NODE_H + 14, rx: 12 }, nb);
+    s("rect", { class: "box", width: n.w, height: NODE_H, rx: 8 }, nb);
+    const label = s("text", { class: "label", x: n.w / 2, y: n.sub ? 25 : 34, "text-anchor": "middle" }, nb); label.textContent = n.label || n.id;
+    if (n.sub) { const sub = s("text", { class: "sub", x: n.w / 2, y: 42, "text-anchor": "middle" }, nb); sub.textContent = n.sub; }
+    const tag = s("g", { class: "tag" }, nb);
+    const tagText = n.kind.toUpperCase(), tw = tagText.length * 6.4 + 12;
+    s("rect", { x: n.w - tw - 8, y: -8, width: tw, height: 16, rx: 8 }, tag);
+    const tt = s("text", { x: n.w - tw / 2 - 8, y: 3.5, "text-anchor": "middle" }, tag); tt.textContent = n.kind;
+  }
+
+  const E = D.edges.filter((e) => N.has(e.from) && N.has(e.to)).map((e) => {
+    const a = N.get(e.from), b = N.get(e.to), key = `${e.from}>${e.to}`;
+    const twin = edgeKeys.has(`${e.to}>${e.from}`) ? (e.from < e.to ? -8 : 8) : 0;
+    const ax = a.x + a.w / 2, ay = a.y + NODE_H / 2, bx = b.x + b.w / 2, by = b.y + NODE_H / 2;
+    let d;
+    if (Math.abs(bx - ax) >= Math.abs(by - ay)) {
+      const dir = Math.sign(bx - ax) || 1, x1 = dir > 0 ? a.x + a.w : a.x, x2 = (dir > 0 ? b.x : b.x + b.w) - dir * 2;
+      const c = Math.max(28, Math.abs(x2 - x1) / 2);
+      d = `M${x1},${ay + twin} C${x1 + dir * c},${ay + twin} ${x2 - dir * c},${by + twin} ${x2},${by + twin}`;
+    } else {
+      const dir = Math.sign(by - ay) || 1, y1 = dir > 0 ? a.y + NODE_H : a.y, y2 = (dir > 0 ? b.y : b.y + NODE_H) - dir * 2;
+      const c = Math.max(22, Math.abs(y2 - y1) / 2);
+      d = `M${ax + twin},${y1} C${ax + twin},${y1 + dir * c} ${bx + twin},${y2 - dir * c} ${bx + twin},${y2}`;
+    }
+    const g = s("g", { class: "edge" }, edgeLayer);
+    const path = s("path", { class: "line", d }, g);
+    const len = path.getTotalLength();
+    if (e.label) {
+      const at = path.getPointAtLength(len * (twin ? 0.3 : 0.5)); /* twins: each label near its own source, so they never meet */
+      const t = s("text", { class: "elabel", x: at.x, y: at.y + (twin > 0 ? 14 : -6), "text-anchor": "middle" }, g);
+      t.textContent = e.label;
+    }
+    return { ...e, kind: e.kind || "same", key, g, path, len };
+  });
+  const EK = new Map(E.map((e) => [e.key, e]));
+
+  /* ── state: which view, which step ── */
+  let cur = 0, view = "after", playing = false, timer = 0, touched = false, packets = [], cycleStart = 0;
+  const visible = (kind, v) => !(v === "before" && kind === "new");
+  const nodeState = (n, v, focus) => {
+    if (!visible(n.kind, v)) return "hidden";
+    if (v === "after" && n.kind === "removed") return "ghost";
+    if (focus.size) return focus.has(n.id) ? "focus" : "dim";
+    return "normal";
+  };
+
+  function render() {
+    const st = STEPS[cur] || {};
+    const focus = new Set(st.focus || []), flow = st.flow || [];
+    for (const n of N.values()) {
+      n.g.dataset.state = nodeState(n, view, focus);
+      n.g.dataset.mark = view === "after" ? n.kind : "same";
+    }
+    const shown = (e) => N.get(e.from).g.dataset.state !== "hidden" && N.get(e.to).g.dataset.state !== "hidden" && visible(e.kind, view);
+    for (const e of E) {
+      e.g.dataset.mark = view === "after" ? e.kind : "same";
+      e.g.dataset.state = !shown(e) ? "hidden" : view === "after" && e.kind === "removed" ? "ghost"
+        : flow.includes(e.key) ? "flow" : focus.size || flow.length ? "dim" : "normal";
+    }
+    viewBefore.setAttribute("aria-pressed", String(view === "before"));
+    viewAfter.setAttribute("aria-pressed", String(view === "after"));
+    packetLayer.replaceChildren();
+    packets = reduced ? [] : flow.map((k) => EK.get(k)).filter((e) => e && e.g.dataset.state === "flow")
+      .map((e) => ({ e, dot: s("circle", { class: "packet", r: 5, opacity: 0 }, packetLayer), arrived: false }));
+    cycleStart = performance.now();
+  }
+
+  function show(i) {
+    if (!STEPS.length) { render(); return; }
+    cur = (i + STEPS.length) % STEPS.length;
+    const st = STEPS[cur];
+    view = st.view === "before" ? "before" : "after";
+    render();
+    caption.replaceChildren(h("h3", {}, h("span", { class: "eyebrow" }, `Step ${cur + 1}`), fmt(st.title)), h("p", {}, fmt(st.text)));
+    caption.removeAttribute("data-swap"); void caption.offsetWidth; caption.setAttribute("data-swap", "");
+    counter.textContent = `${cur + 1} / ${STEPS.length}`;
+    [...stepList.querySelectorAll("button")].forEach((b, j) => (j === cur ? b.setAttribute("aria-current", "step") : b.removeAttribute("aria-current")));
+    progress.style.width = `${((cur + 1) / STEPS.length) * 100}%`;
+    clearTimeout(timer);
+    if (playing) {
+      if (cur === STEPS.length - 1) { timer = setTimeout(() => setPlaying(false), dwell(st)); }
+      else timer = setTimeout(() => show(cur + 1), dwell(st));
+    }
+  }
+  const dwell = (st) => Math.max(4200, 1600 + String(st.text || "").length * 38, (st.flow || []).length * SEG_MS + 1800);
+  function setPlaying(on) {
+    playing = on;
+    playBtn.replaceChildren(icon(on ? ICONS.pause : ICONS.play), on ? "Pause" : "Play");
+    playBtn.setAttribute("aria-label", on ? "Pause the walk-through" : "Play the walk-through");
+    clearTimeout(timer);
+    if (on) show(cur === STEPS.length - 1 ? 0 : cur);
+  }
+  const userGo = (i) => { touched = true; setPlaying(false); show(i); };
+
+  STEPS.forEach((st, i) => {
+    const b = h("button", { type: "button" }, h("span", { class: "n" }, String(i + 1)), fmt(st.title));
+    b.addEventListener("click", () => userGo(i));
+    stepList.append(h("li", {}, b));
+  });
+  prevBtn.addEventListener("click", () => userGo(cur - 1));
+  nextBtn.addEventListener("click", () => userGo(cur + 1));
+  playBtn.addEventListener("click", () => { touched = true; setPlaying(!playing); });
+  viewBefore.addEventListener("click", () => { touched = true; setPlaying(false); view = "before"; render(); });
+  viewAfter.addEventListener("click", () => { touched = true; setPlaying(false); view = "after"; render(); });
+  document.addEventListener("keydown", (ev) => {
+    if (ev.altKey || ev.ctrlKey || ev.metaKey) return;
+    if (ev.key === "ArrowRight") userGo(cur + 1);
+    else if (ev.key === "ArrowLeft") userGo(cur - 1);
+  });
+  [prevBtn, nextBtn, playBtn].forEach((b) => (b.disabled = STEPS.length < 2));
+  setPlaying(false);
+  show(0);
+
+  /* packets travel the step's flow edges one after another, then rest and repeat */
+  function frame(now) {
+    if (packets.length) {
+      const cycle = packets.length * SEG_MS + REST_MS, t = (now - cycleStart) % cycle;
+      packets.forEach((p, i) => {
+        const local = (t - i * SEG_MS) / SEG_MS;
+        if (local < 0 || local > 1) { p.dot.setAttribute("opacity", "0"); if (local < 0) p.arrived = false; return; }
+        const k = local < 0.5 ? 2 * local * local : 1 - (-2 * local + 2) ** 2 / 2;
+        const pt = p.e.path.getPointAtLength(k * p.e.len);
+        p.dot.setAttribute("cx", pt.x); p.dot.setAttribute("cy", pt.y); p.dot.setAttribute("opacity", "1");
+        if (local > 0.97 && !p.arrived) {
+          p.arrived = true;
+          const target = N.get(p.e.to).g;
+          target.removeAttribute("data-ping"); void target.getBoundingClientRect(); target.setAttribute("data-ping", "");
+        }
+      });
+    }
+    requestAnimationFrame(frame);
+  }
+  if (!reduced) requestAnimationFrame(frame);
+
+  /* ── the rest of the story ── */
+  if (C.decisions?.length) main.append(section("decisions", "Decisions", h("div", { class: "cards" }, C.decisions.map((d) =>
+    h("div", { class: "card" }, h("div", { class: "chose" }, fmt(d.chose)),
+      d.over ? h("div", { class: "over" }, "over ", h("s", {}, fmt(d.over))) : null,
+      h("p", { class: "because" }, fmt(d.because)))))));
+  if (C.risks?.length || C.outOfScope?.length) {
+    const arrow = () => { const a = s("svg", { viewBox: "0 0 28 14", "aria-hidden": "true" }); s("path", { d: "M2 7h22M18 2l6 5-6 5" }, a); return a; };
+    main.append(section("risks", "Risks and limits",
+      C.risks?.length ? h("div", { class: "risks" }, C.risks.map((r) => h("div", { class: "risk" },
+        h("div", {}, h("span", { class: "eyebrow" }, "Risk"), h("div", {}, fmt(r.risk))), arrow(),
+        h("div", {}, h("span", { class: "eyebrow" }, "Mitigation"), h("div", {}, fmt(r.mitigation)))))) : null,
+      C.outOfScope?.length ? [h("div", { class: "eyebrow sub-head" }, "Out of scope"), h("div", { class: "tags" }, C.outOfScope.map((o) => h("span", {}, fmt(o))))] : null));
+  }
+  if (C.plan?.length) {
+    const total = C.plan.reduce((a, p) => a + (Number(p.tasks) || 0), 0);
+    main.append(section("plan", `The plan — ${total} task${total === 1 ? "" : "s"}`, h("ol", { class: "plan reveal-line" }, C.plan.map((p, i) =>
+      h("li", { style: `--i:${i}` }, h("span", { class: "dot" }, String(i + 1)), h("div", { class: "g" }, fmt(p.group)),
+        h("div", { class: "c" }, `${p.tasks} task${p.tasks === 1 ? "" : "s"}`))))));
+  }
+  const dir = `openspec/changes/${C.slug}/`;
+  app.append(h("footer", {}, h("div", { class: "wrap" }, "Source: ", h("code", {}, dir), " — ",
+    h("a", { href: "proposal.md" }, "proposal.md"), " · ", h("a", { href: "design.md" }, "design.md"), " · ", h("a", { href: "tasks.md" }, "tasks.md"),
+    ". Use ← → to step through the diagram.")));
+
+  /* sections fade in once; the walk-through starts playing the first time the stage is in view */
+  const io = new IntersectionObserver((entries) => entries.forEach((en) => {
+    if (!en.isIntersecting) return;
+    en.target.setAttribute("data-in", "");
+    en.target.querySelectorAll(".reveal-line").forEach((el) => el.setAttribute("data-in", ""));
+    io.unobserve(en.target);
+  }), { threshold: 0.12 });
+  document.querySelectorAll(".reveal").forEach((el) => io.observe(el));
+  if (!reduced && STEPS.length > 1) {
+    const auto = new IntersectionObserver(([en]) => {
+      if (en.isIntersecting && !touched) { setPlaying(true); auto.disconnect(); }
+    }, { threshold: 0.45 });
+    auto.observe(stage);
+  }
+})();
+</script>
+</body>
+</html>
