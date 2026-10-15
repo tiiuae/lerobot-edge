@@ -23,6 +23,8 @@ and code ownership, without a big-bang cleanup of existing code.
     has them. Extending the team base applied the team rules to all of upstream through pre-commit (lerobot's
     Quality check: 10,086 findings). The team rules still gate new code: `ci.yml`'s ratchet lints `deployment/` with
     `.dev-standard/ruff.toml` directly.
+  - `docs/adr/0001-adopt-dev-standard-in-a-public-fork.md`: records the durable decisions (copied workflows, team
+    rules through the ratchet only, owned paths only).
   - `.editorconfig`: `mdx` added to the 2-space group. Prettier reads `.editorconfig`; with 4 spaces it re-indented
     lerobot's `.mdx` docs, which fails Quality.
   - `pyproject.toml`: `[tool.coverage.run] relative_files = true`, which the CI's coverage comment needs: it reads

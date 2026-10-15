@@ -12,6 +12,7 @@
 - [x] 1.8 Write `design.md` (flowchart and Before/After diagrams) and `explainer.html` from the team templates and verify `openspec validate adopt-standard` passes and the explainer renders without an error banner
 - [x] 1.9 Set `relative_files = true` under `[tool.coverage.run]` and verify coverage data recorded in one checkout reads from another (it failed with `NoSource` before, as the coverage-comment step did in CI)
 - [x] 1.10 Add `mdx` to `.editorconfig`'s 2-space group and verify Prettier leaves lerobot's `.mdx` docs unchanged in `pre-commit run --all-files`
+- [x] 1.11 Record the durable decisions in `docs/adr/0001-adopt-dev-standard-in-a-public-fork.md` (MADR, from the repository's template) and verify it passes the Markdown hooks
 
 ## 2. Decisions to confirm
 

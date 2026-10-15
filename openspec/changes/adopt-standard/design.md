@@ -70,6 +70,9 @@ Caption: what a PR into `main` goes through before and after the adoption; lerob
 
 ## Decisions
 
+The durable ones (copied workflows, owned paths only, team rules through the ratchet) are recorded in
+`docs/adr/0001-adopt-dev-standard-in-a-public-fork.md`.
+
 - **Copy the two team workflows into the repository, over the `uses:` stubs.** The stubs cannot start on a public
   repository while tiiuae/dev-standard is private. Alternatives: make dev-standard public (an org decision, and it
   also needs a `v1` ref), make lerobot-edge private (a public fork cannot be made private without leaving the fork
