@@ -11,7 +11,7 @@ and code ownership, without a big-bang cleanup of existing code.
 
 - Added by `install.sh`: `.dev-standard/` (vendored ruff, mypy, prettier and clang-format configs, the ratchet
   script and `STANDARD.md`), `.editorconfig`, `CODEOWNERS`, `.github/ISSUE_TEMPLATE/{feature,backlog}.md`,
-  `.github/workflows/ci.yml`, `.github/workflows/graph-on-merge.yml`, `docs/adr/0000-template.md`, `openspec/`
+  `.github/workflows/ci.yml`, `.github/workflows/graph-on-merge.yml` (removed again, see below), `docs/adr/0000-template.md`, `openspec/`
   (config, team schema `dev-standard`), the OpenSpec commands and skills under `.claude/` and `.agents/`, the
   shared skills, and `skills-lock.json`.
 - Edited by `install.sh`: the team block appended to `AGENTS.md`; `extend = ".dev-standard/ruff.toml"` added to
@@ -23,14 +23,17 @@ and code ownership, without a big-bang cleanup of existing code.
     has them. Extending the team base applied the team rules to all of upstream through pre-commit (lerobot's
     Quality check: 10,086 findings). The team rules still gate new code: `ci.yml`'s ratchet lints `deployment/` with
     `.dev-standard/ruff.toml` directly.
-  - `docs/adr/0001-adopt-dev-standard-in-a-public-fork.md`: records the durable decisions (copied workflows, team
+  - `docs/adr/0001-adopt-dev-standard-in-a-public-fork.md`: records the durable decisions (copied CI workflow, graph job left out, team
     rules through the ratchet only, owned paths only).
   - `.editorconfig`: `mdx` added to the 2-space group. Prettier reads `.editorconfig`; with 4 spaces it re-indented
     lerobot's `.mdx` docs, which fails Quality.
   - `pyproject.toml`: `[tool.coverage.run] relative_files = true`, which the CI's coverage comment needs: it reads
     the coverage data inside a container, where the runner's absolute paths don't exist.
-  - `.github/workflows/ci.yml` and `graph-on-merge.yml`: the installer's stubs replaced with copies of the team
-    workflows (dev-standard v1.3.1), because a public repository cannot call reusable workflows from the private
+  - `.github/workflows/graph-on-merge.yml`: removed. Copied like `ci.yml`, it would run after every merge to `main`;
+    its graphify step writes a ~21 MB `graphify-out/graph.json` plus `GRAPH_REPORT.md`, which fail lerobot's pre-commit hooks (1 MB large-file limit, end-of-file, typos, Prettier), and its auto-commit step fails on the missing `docs/diagrams/` paths, so every merge would
+    fail and the committed graph would break lerobot's Quality check.
+  - `.github/workflows/ci.yml`: the installer's stub replaced with a copy of the team workflow (dev-standard
+    v1.3.1), because a public repository cannot call reusable workflows from the private
     tiiuae/dev-standard. Inputs filled in: lint, ratchet and tests on `deployment/` and `tests/deployment/` (the
     team-owned code in this fork); install the `dev` and `test` extras plus the server's `websockets` and `msgpack`;
     Python `3.12` (`requires-python >= 3.12`); docs off. Actions are pinned to commit SHAs, permissions are per job,
@@ -59,5 +62,7 @@ None.
   mypy are non-blocking until that code is clean.
 - `deployment/` is on `main` (#2), so CI compares like for like: every blocking `ci / python` step passes locally
   against `origin/main` (ratchet 7 → 7 size, 88 → 88 lint; tests; patch coverage; gitleaks; change folder).
-- The copied workflows run on this public repository today, but no longer update when dev-standard does: re-copy
-  them on every dev-standard upgrade, and switch back to the stubs once tiiuae/dev-standard is public (see tasks).
+- The copied `ci.yml` runs on this public repository today, but no longer updates when dev-standard does: re-copy
+  it on every dev-standard upgrade, and switch back to the stub once tiiuae/dev-standard is public (see tasks).
+- No graph or diagrams are regenerated after merges (`graph-on-merge.yml` left out); `AGENTS.md`'s managed team
+  block still mentions them, because the installer owns that text.

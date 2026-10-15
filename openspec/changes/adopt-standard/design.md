@@ -26,7 +26,6 @@ flowchart LR
   pr -->|review| owners[CODEOWNERS]:::new
   owners -->|approve| main[main]
   ci -->|green| main
-  main -->|push| gom[graph-on-merge.yml, copied]:::new
   classDef new stroke:#00c389,stroke-width:2px
   classDef changed stroke:#6400ff,stroke-width:2px
   classDef removed stroke:#e5484d,stroke-width:2px,stroke-dasharray:4 3
@@ -70,16 +69,17 @@ Caption: what a PR into `main` goes through before and after the adoption; lerob
 
 ## Decisions
 
-The durable ones (copied workflows, owned paths only, team rules through the ratchet) are recorded in
+The durable ones (copied CI workflow, graph job left out, owned paths only, team rules through the ratchet) are recorded in
 `docs/adr/0001-adopt-dev-standard-in-a-public-fork.md`.
 
-- **Copy the two team workflows into the repository, over the `uses:` stubs.** The stubs cannot start on a public
+- **Copy the team CI workflow into the repository, over the `uses:` stub.** The stub cannot start on a public
   repository while tiiuae/dev-standard is private. Alternatives: make dev-standard public (an org decision, and it
   also needs a `v1` ref), make lerobot-edge private (a public fork cannot be made private without leaving the fork
   network), or wait (no CI meanwhile). The copies are dev-standard v1.3.1 with the inputs filled in, the same job
   names (so the check names stay `ci / python` and `ci / change-present`), actions pinned to commit SHAs, per-job
   permissions and `persist-credentials: false` where nothing pushes, as this repository's zizmor policy requires.
-  Task 4.5 switches back to the stubs once dev-standard is public.
+  Task 4.5 switches back to the stub once dev-standard is public.
+- **Leave `graph-on-merge.yml` out, over copying it too or committing its output.** Run after every merge, its graphify step writes a ~21 MB `graphify-out/graph.json` plus `GRAPH_REPORT.md`, which fail lerobot's pre-commit hooks (1 MB large-file limit, end-of-file, typos, Prettier), and its auto-commit step fails on the missing `docs/diagrams/` paths. Excluding `graphify-out/` from the hooks would still commit ~21 MB to `main` on every merge.
 - **Lint, ratchet and test only `deployment/` and `tests/deployment/`, over `src/`.** On a fork, upstream code is not
   ours to clean; upstream's suite keeps running in `fast_tests.yml` / `full_tests.yml`. `dataset-wizard.py` stays out
   for now (task 2.3).
@@ -100,8 +100,9 @@ The durable ones (copied workflows, owned paths only, team rules through the rat
 
 ## Risks / Trade-offs
 
-- [The copied workflows drift from dev-standard's] → the header of each file names the source commit; re-copy on every
-  dev-standard upgrade, and switch back to the stubs once dev-standard is public (task 4.5).
+- [The copied `ci.yml` drifts from dev-standard's] → its header names the source commit; re-copy it on every
+  dev-standard upgrade, and switch back to the stub once dev-standard is public (task 4.5).
+- [No code graph or diagrams after merges] → acceptable for now; adding them needs `graphify-out/` kept out of Git.
 - [Pinned action SHAs go stale] → bump them deliberately on upgrade, like the rest of this repository's workflows.
 - [Editors and pre-commit don't show the team rules] → the ratchet in `ci.yml` blocks new team-rule violations on
   every PR.

@@ -230,7 +230,7 @@ const CHANGE = {
   ],
   idea: [
     "Install the standard: team configs, change folders, skills and code owners.",
-    "Copy the two team workflows into the repository so they can run here.",
+    "Copy the team CI workflow into the repository so it can run here.",
     "Check only our own code: `deployment/` and its tests.",
     "Freeze existing lint debt with a ratchet; new code must be clean.",
     "Two code owners review every PR.",
@@ -247,7 +247,6 @@ const CHANGE = {
       { id: "change", label: "openspec/changes/",   sub: "proposal, design, tasks", col: 2, row: 3, kind: "new" },
       { id: "py",     label: "pyproject.toml",      sub: "coverage paths for CI",   col: 3, row: 0, kind: "changed" },
       { id: "main",   label: "main",                sub: "merge after review",      col: 4, row: 1, kind: "same" },
-      { id: "graph",  label: "graph-on-merge.yml",  sub: "code graph after merge",  col: 4, row: 2, kind: "new" },
     ],
     edges: [
       { from: "pr",     to: "lci",    label: "runs",           kind: "same" },
@@ -259,7 +258,6 @@ const CHANGE = {
       { from: "pr",     to: "owners", label: "review",         kind: "new" },
       { from: "owners", to: "main",   label: "approve",        kind: "new" },
       { from: "ci",     to: "main",   label: "green",          kind: "new" },
-      { from: "main",   to: "graph",  label: "push",           kind: "new" },
     ],
   },
 
@@ -279,28 +277,28 @@ const CHANGE = {
     { title: "Team rules in CI, lerobot's rules locally",
       text: "The ratchet lints `deployment/` with the team ruff base directly. `pyproject.toml` keeps lerobot's own ruff rules and only adds the coverage setting the CI needs.",
       focus: ["ci", "base", "py"], flow: ["ci>base", "ci>py"] },
-    { title: "Review, merge, then the graph",
-      text: "A code owner approves, the checks are green, the PR merges, and `graph-on-merge.yml` refreshes the code graph on `main`.",
-      focus: ["owners", "main", "graph"], flow: ["pr>owners", "owners>main", "ci>main", "main>graph"] },
+    { title: "Review, then merge",
+      text: "A code owner approves and the checks are green, so the PR can merge into `main`.",
+      focus: ["owners", "main"], flow: ["pr>owners", "owners>main", "ci>main"] },
   ],
 
   decisions: [
-    { chose: "Copy the team workflows in", over: "the `uses:` stubs", because: "A public repository cannot call workflows from the private tiiuae/dev-standard; switch back once it is public." },
+    { chose: "Copy the team CI in", over: "the `uses:` stub", because: "A public repository cannot call workflows from the private tiiuae/dev-standard; switch back once it is public." },
     { chose: "Check only `deployment/` and its tests", over: "all of `src/`", because: "On a fork, upstream code is not ours to clean; lerobot's CI keeps testing it." },
     { chose: "Team rules through the ratchet", over: "extending the team base in `pyproject.toml`", because: "Extending applied the team rules to all of upstream and failed lerobot's Quality check." },
     { chose: "Two code owners", over: "one", because: "An author cannot approve their own PR." },
   ],
   risks: [
-    { risk: "The copied workflows drift from the team's.", mitigation: "Each file names its source commit; re-copy on upgrade and switch back to the stubs once the team repository is public." },
+    { risk: "The copied CI drifts from the team's.", mitigation: "It names its source commit; re-copy on upgrade and switch back to the stub once the team repository is public." },
     { risk: "An installer re-run adds the ruff `extend` back.", mitigation: "Remove it again after every run; it is a follow-up task." },
     { risk: "Pinned action versions go stale.", mitigation: "Bump them deliberately on upgrade, like the repository's other workflows." },
   ],
   outOfScope: ["Cleaning existing lint or type debt", "Changing upstream code or lerobot's own workflows", "GitHub settings: branch protection, labels, secrets"],
   plan: [
-    { group: "Adoption", tasks: 11 },
+    { group: "Adoption", tasks: 12 },
     { group: "Decisions to confirm", tasks: 4 },
     { group: "Only a human can do", tasks: 3 },
-    { group: "Follow-ups", tasks: 7 },
+    { group: "Follow-ups", tasks: 8 },
   ],
 };
 </script>
