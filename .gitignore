@@ -176,3 +176,6 @@ outputs/
 *.urdf
 *.xml
 *.part
+
+# Dataset Wizard runtime config (may contain credentials); use config.example.yaml as the template
+config.yaml
