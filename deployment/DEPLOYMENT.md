@@ -94,6 +94,37 @@ Optional CLI flags are `--device`, `--port`, `--idle_timeout`, `--debug_dir`,
 and the `--rtc_*` settings. Camera mapping, wire color space, stationary-base
 adaptation, and action mapping are intentionally fixed in the code.
 
+## Run the server in Docker
+
+`deployment/Dockerfile` builds the same server on Python 3.12 from `uv.lock`
+(`lerobot[pi]`, plus `websockets` and `msgpack`). The image holds no weights:
+the checkpoint and the Hugging Face cache with the PaliGemma tokenizer are
+mounted at run time. Every argument after the image name goes to
+`server_policy.py`.
+
+```bash
+docker build -t lerobot-pi05-server -f deployment/Dockerfile .   # from the repository root
+
+docker run --rm --gpus '"device=0"' --network host \
+  -v /path/to/checkpoints:/models:ro \
+  -v $HOME/.cache/huggingface:/root/.cache/huggingface \
+  -e HF_HUB_OFFLINE=1 \
+  lerobot-pi05-server --ckpt_path /models/pi05/pretrained_model --port 8800
+```
+
+The same through compose, from `deployment/`:
+
+```bash
+make docker-build
+make docker-up-d CKPT=/models/<dir>/pretrained_model MODELS_DIR=/path/to/checkpoints GPU=0 PORT=8800
+make docker-logs
+make docker-down
+```
+
+`HF_HUB_OFFLINE=1` (the compose default) makes a missing tokenizer fail at
+start instead of reaching the Hub; `google/paligemma-3b-pt-224` is gated, so
+cache it once with `make cache-tokenizer` while logged in.
+
 ## Compatible checkpoint contract
 
 This server is not tied to one checkpoint path, but every checkpoint must use

@@ -1,46 +1,32 @@
-# Run with:
-#   cd lerobot/deployment
-#   docker compose up --build
-#
-# Override values via env or `make docker-up CKPT=/path POLICY_TYPE=pi05 ...`.
+# The pi0.5 model server in Docker. Run from this directory:
+#   docker compose up -d --build
+# or through the Makefile: `make docker-up-d CKPT=/models/<dir>/pretrained_model GPU=0`.
+# CKPT is a path inside the container: MODELS_DIR on the host is mounted at /models.
 services:
   lerobot_server:
-    image: lerobot_server:latest
+    image: ${DOCKER_IMAGE:-lerobot-pi05-server}:${DOCKER_TAG:-latest}
     build:
       context: ..
       dockerfile: deployment/Dockerfile
     init: true
-    tty: true
-    stdin_open: true
-    network_mode: host                   # so PORT inside == outside; useful for low-latency robot links
-    # ports:                             # uncomment if you prefer bridged networking
-    #   - "${PORT:-8800}:${PORT:-8800}"
-
+    network_mode: host # the robot client connects to PORT on this machine
     volumes:
-      # Mount checkpoint directory (host) → /models (container).
-      - ${MODELS_DIR:-/home/ibrahim/storage/VLA_MODELS}:/models:ro
-      # Persist HuggingFace cache so paligemma tokenizer / weights aren't redownloaded each run.
+      - ${MODELS_DIR:-/home/ibrahim/storage}:/models:ro
+      # Holds the PaliGemma tokenizer the pre-processor loads by name.
       - ${HF_CACHE:-${HOME}/.cache/huggingface}:/root/.cache/huggingface
-      # Optional debug artefact dir (host).
       - ${DEBUG_HOST_DIR:-/tmp/lerobot_debug}:/debug
-
     environment:
-      # Built up from compose vars so `make docker-up CKPT=... POLICY_TYPE=...` flows through.
-      # Note: CKPT must be a path INSIDE /models (since MODELS_DIR is mounted there).
-      - SERVER_ARGS=--ckpt_path ${CKPT:-/models/checkpoint}
-                    ${POLICY_TYPE:+--policy_type ${POLICY_TYPE}}
-                    --camera_keys ${CAM_KEYS:-cam_high:primary,cam_left_wrist:secondary,cam_right_wrist:wrist}
-                    --actions_per_chunk ${ACTIONS:-25}
-                    --device ${DEVICE:-cuda:0}
-                    --port ${PORT:-8800}
-                    --idle_timeout ${IDLE_TIMEOUT:--1}
-                    --use_bf16
-                    ${DEBUG_DIR:+--debug_dir ${DEBUG_DIR}}
-
+      - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
+    command: >-
+      --ckpt_path ${CKPT:-/models/checkpoint}
+      --device cuda
+      --port ${PORT:-8800}
+      --idle_timeout ${IDLE_TIMEOUT:--1}
+      ${EXTRA:-}
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ["0"]
+              device_ids: ["${GPU:-0}"]
               capabilities: [gpu]

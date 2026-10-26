@@ -1,50 +1,45 @@
-# Dockerfile for the LeRobot policy server.
-# Build context = the `lerobot/` repo root (parent of `deployment/`).
+# The pi0.5 model server (deployment/model_server/server_policy.py) as an image.
+# Build context = the repository root (parent of `deployment/`):
 #
-# Build:
-#   docker build -t lerobot_server -f deployment/Dockerfile .
-# Run:
-#   docker run --rm -it --gpus=all -p 8800:8800 \
-#     -v /path/to/checkpoints:/models -v $HOME/.cache/huggingface:/root/.cache/huggingface \
-#     -e SERVER_ARGS="--ckpt_path /models/<ckpt> --camera_keys cam_high:primary,cam_left_wrist:secondary,cam_right_wrist:wrist --use_bf16 --port 8800" \
-#     lerobot_server
+#   docker build -t lerobot-pi05-server -f deployment/Dockerfile .
+#
+# Run (the checkpoint and the Hugging Face cache holding the PaliGemma tokenizer are mounted):
+#
+#   docker run --rm --gpus '"device=0"' --network host \
+#     -v /path/to/pi05:/models/pi05:ro \
+#     -v $HOME/.cache/huggingface:/root/.cache/huggingface \
+#     lerobot-pi05-server --ckpt_path /models/pi05/pretrained_model --port 8800
+#
+# Every argument after the image name goes to server_policy.py (see DEPLOYMENT.md).
 
-FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
-COPY --from=ghcr.io/astral-sh/uv:0.5.1 /uv /uvx /bin/
+ARG PYTHON_VERSION=3.12
+FROM python:${PYTHON_VERSION}-slim
 
 ENV DEBIAN_FRONTEND=noninteractive \
+    PATH=/lerobot/.venv/bin:$PATH \
+    PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy \
-    UV_PROJECT_ENVIRONMENT=/opt/venv \
-    PATH=/opt/venv/bin:/usr/local/bin:$PATH \
-    PYTHONUNBUFFERED=1
+    UV_HTTP_TIMEOUT=600 \
+    HF_HOME=/root/.cache/huggingface
 
-# System deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3.10 python3.10-venv python3.10-dev \
-        git git-lfs build-essential ca-certificates \
-        libgl1 libglib2.0-0 \
-    && rm -rf /var/lib/apt/lists/*
+        build-essential git curl ca-certificates libglib2.0-0 libgl1 ffmpeg \
+    && curl -LsSf https://astral.sh/uv/0.8.17/install.sh | sh \
+    && mv /root/.local/bin/uv /usr/local/bin/uv \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+WORKDIR /lerobot
 
-# Create venv
-RUN uv venv --python 3.10 ${UV_PROJECT_ENVIRONMENT}
+# Dependencies first, from the lockfile, so a source change does not reinstall torch.
+COPY setup.py pyproject.toml uv.lock README.md MANIFEST.in ./
+RUN uv venv && uv sync --locked --extra pi --no-install-project --no-cache
 
-# Install lerobot + pi extra (transformers fork) + websocket deps
-COPY pyproject.toml /app/pyproject.toml
-COPY src /app/src
-COPY README.md /app/README.md
-RUN UV_HTTP_TIMEOUT=600 UV_HTTP_RETRIES=10 GIT_LFS_SKIP_SMUDGE=1 \
-    uv pip install -e ".[pi]" && \
-    uv pip install websockets msgpack
+COPY src ./src
+RUN uv sync --locked --extra pi --no-cache \
+    && uv pip install --no-cache "websockets==17.0.1" "msgpack==1.2.1"
 
-# Copy deployment server code
-COPY deployment /app/deployment
+COPY deployment ./deployment
 
 EXPOSE 8800
-
-# SERVER_ARGS overridable at run time, e.g.:
-#   -e SERVER_ARGS="--ckpt_path /models/foo --port 8800 --use_bf16"
-ENV SERVER_ARGS="--ckpt_path /models/checkpoint --camera_keys cam_high:primary,cam_left_wrist:secondary,cam_right_wrist:wrist --actions_per_chunk 25 --use_bf16 --device cuda:0 --port 8800 --idle_timeout -1"
-
-CMD ["/bin/bash", "-c", "python -m deployment.model_server.server_policy $SERVER_ARGS"]
+ENTRYPOINT ["python", "-m", "deployment.model_server.server_policy"]
+CMD ["--help"]
